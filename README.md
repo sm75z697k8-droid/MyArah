@@ -93,3 +93,17 @@ This version adds **a real traffic map overlay, not fake color-coded roads**. It
 Data: TomTom Orbis raster flow v2 (https://docs.tomtom.com/traffic-api/documentation/tomtom-orbis-maps/v2/traffic-flow/raster-flow-tiles). TomTom lists traffic flow coverage for Malaysia. Traffic tile requests may incur charges beyond the provider's current allowance.
 
 **API key safety:** The key is entered and stored in this device's browser local storage only; it is not embedded in `app.js` or uploaded to GitHub. However, browser JavaScript / network requests can expose keys. For a production public app, use a secure backend proxy or appropriately restricted public key, plus rate limiting. Do not use a high-value unrestricted key.
+
+## TomTom key setup on your iPhone (no public key in GitHub)
+
+This version intentionally **does not include your TomTom API key** in any HTML, JavaScript, CSS or ZIP file. GitHub Pages serves these files publicly, so embedding the key would make it accessible to anyone visiting the site.
+
+1. Publish these four files to your current MyArah GitHub Pages repository.
+2. On your iPhone, open MyArah, press the **Traffic** button, and paste your key into **TomTom Traffic API key**.
+3. Press **Connect traffic**. MyArah checks a live TomTom raster tile and turns traffic on only if the request succeeds.
+4. The app remembers the key **only in local browser storage on this device** and, after a successful connection, automatically reconnects on future launches.
+5. Turning Traffic off also disables automatic reconnection until you turn it on again. **Forget key** clears both the saved key and reconnection preference.
+
+A webpage cannot securely hide a key from browser network requests, even when the key is stored only locally. Restrict the TomTom key to your GitHub Pages domain and to the traffic service in TomTom's key management settings. For a large public launch, proxy requests through a backend that protects the key. Never publish the key in a repository or share screenshots of the Traffic settings with the key visible.
+
+This update does **not** test, validate, or use up quota from your specific supplied API key. Only your browser can make the live request after you paste it.

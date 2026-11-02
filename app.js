@@ -447,11 +447,15 @@ const TRAFFIC_LAYER = 'myarah-traffic-overlay';
 const TRAFFIC_REFRESH_MS = 120000;
 let trafficKey = '';
 let trafficOn = false;
+let trafficAutoResume = false;
 let trafficRefreshTimer = null;
 let trafficAbortController = null;
 let trafficBusy = false;
 let trafficPreviousFocus = null;
-try { trafficKey = localStorage.getItem('myarahTomTomTrafficKey') || ''; } catch (_) {}
+try {
+  trafficKey = localStorage.getItem('myarahTomTomTrafficKey') || '';
+  trafficAutoResume = localStorage.getItem('myarahTrafficAutoResume') === '1';
+} catch (_) {}
 
 const trafficToggle = $('trafficToggle');
 const trafficLegend = $('trafficLegend');
@@ -524,6 +528,9 @@ function refreshTraffic() {
 }
 
 function turnTrafficOff() {
+  // Turning traffic off is respected on the next app launch.
+  trafficAutoResume = false;
+  try { localStorage.setItem('myarahTrafficAutoResume', '0'); } catch (_) {}
   if (trafficAbortController) trafficAbortController.abort();
   trafficAbortController = null;
   if (trafficRefreshTimer) clearInterval(trafficRefreshTimer);
@@ -537,7 +544,7 @@ function turnTrafficOff() {
   setTrafficVisuals();
 }
 
-async function turnTrafficOn(key) {
+async function turnTrafficOn(key, { quiet = false } = {}) {
   const clean = key.trim();
   if (!clean) {
     setTrafficMessage('Enter your TomTom API key first.', true);
@@ -561,20 +568,30 @@ async function turnTrafficOn(key) {
     if (!(response.headers.get('content-type') || '').includes('image/')) throw new Error('The traffic provider did not return a map tile.');
     if (controller.signal.aborted) return;
     trafficKey = clean;
-    try { localStorage.setItem('myarahTomTomTrafficKey', clean); } catch (_) {}
+    try {
+      localStorage.setItem('myarahTomTomTrafficKey', clean);
+      localStorage.setItem('myarahTrafficAutoResume', '1');
+    } catch (_) {}
+    trafficAutoResume = true;
     trafficOn = true;
     setTrafficVisuals();
     if (map.isStyleLoaded()) installTrafficLayer();
     else map.once('idle', installTrafficLayer);
     if (trafficRefreshTimer) clearInterval(trafficRefreshTimer);
     trafficRefreshTimer = setInterval(refreshTraffic, TRAFFIC_REFRESH_MS);
-    closeTrafficDialog();
-    toast('Live traffic is on · green / yellow / red roads');
+    if (!quiet) closeTrafficDialog();
+    toast(quiet ? 'Live traffic reconnected' : 'Live traffic is on · green / yellow / red roads');
   } catch (error) {
     if (!controller.signal.aborted || error.name === 'AbortError') {
-      if (trafficDialog.hidden) openTrafficDialog();
       const message = error.name === 'AbortError' ? 'Traffic request timed out. Check your connection.' : error.message;
-      setTrafficMessage(message || 'Could not connect to TomTom traffic.', true);
+      if (quiet) {
+        trafficAutoResume = false;
+        try { localStorage.setItem('myarahTrafficAutoResume', '0'); } catch (_) {}
+        toast('Traffic could not reconnect · check Traffic settings');
+      } else {
+        if (trafficDialog.hidden) openTrafficDialog();
+        setTrafficMessage(message || 'Could not connect to TomTom traffic.', true);
+      }
     }
   } finally {
     clearTimeout(timeout);
@@ -617,7 +634,10 @@ $('trafficForget').addEventListener('click', () => {
   turnTrafficOff();
   trafficKey = '';
   trafficKeyInput.value = '';
-  try { localStorage.removeItem('myarahTomTomTrafficKey'); } catch (_) {}
+  try {
+    localStorage.removeItem('myarahTomTomTrafficKey');
+    localStorage.removeItem('myarahTrafficAutoResume');
+  } catch (_) {}
   setTrafficMessage('Saved API key cleared.');
 });
 $('trafficKeyVisibility').addEventListener('click', () => {
@@ -629,3 +649,7 @@ document.addEventListener('keydown', event => { if (event.key === 'Escape' && !t
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshTraffic(); });
 map.on('style.load', () => { if (trafficOn) installTrafficLayer(); });
 setTrafficVisuals();
+
+// Only reconnect automatically after a successful user-initiated connection.
+// The key stays in this device's browser storage; it is never committed to GitHub.
+if (trafficKey && trafficAutoResume) void turnTrafficOn(trafficKey, { quiet: true });
