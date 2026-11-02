@@ -197,3 +197,10 @@ This update only modifies the route comparison UI, the map route layers, and rel
 - In the feature-complete version, the existing GPS location cone and its compass permission logic are reused; no duplicate sensors are registered.
 - Magnetic compass readings can be inaccurate near cars, magnets, and metal. This is not lane-level positioning or a dedicated walking navigation system.
 - Styling is original and inspired by familiar circular navigation dials rather than copying Apple artwork.
+
+
+## Compass update
+- The compass now follows **map rotation only**. It no longer switches into a phone-facing mode.
+- The control is redesigned as a circular liquid-glass compass, inspired by Apple-style map UI without copying Apple assets.
+- It uses a **16-point dial** (N, NNE, NE, ENE, E, ESE, SE, SSE, S, SSW, SW, WSW, W, WNW, NW, NNW).
+- The red north indicator rotates around the dial as the map rotates, and tapping the compass resets the map to north-up.

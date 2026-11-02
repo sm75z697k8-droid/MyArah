@@ -486,47 +486,75 @@ body.dark .route-pick-banner button {background:#294c66;color:#b4deff}
 @media(prefers-reduced-motion:reduce) {.route-card {transition:none}}
 
 
-/* Live compass: a restrained, rotating cardinal dial. All other UI is unchanged. */
+/* Compass redesign: map-rotation indicator only, in a circular liquid-glass capsule. */
 #north.compass-control {
-  width: 57px; height: 66px; padding: 4px 4px 3px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 1px; background: rgba(43,58,77,.97); border: 1px solid rgba(235,244,251,.22);
-  border-radius: 17px; color: #f4f8fd;
-  box-shadow: 0 3px 14px rgba(26,38,50,.20);
+  width: 58px; height: 58px; padding: 0;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  color: #ffffff;
+  background: linear-gradient(180deg, rgba(244,249,255,.34), rgba(172,188,213,.24));
+  border: 1px solid rgba(255,255,255,.32);
+  box-shadow:
+    0 8px 24px rgba(18,30,46,.18),
+    inset 0 1px 0 rgba(255,255,255,.38),
+    inset 0 -12px 24px rgba(67,86,116,.16);
+  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+  backdrop-filter: blur(20px) saturate(1.35);
   touch-action: manipulation;
 }
 #north .compass-dial {
-  display: grid; place-items: center; position: relative;
-  width: 45px; height: 45px; flex: none; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #63758b, #344457 76%);
-  border: 1px solid rgba(246,250,255,.30);
-  box-shadow: inset 0 0 0 1px rgba(12,23,37,.14);
+  position: relative; display: grid; place-items: center;
+  width: 48px; height: 48px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.18), rgba(255,255,255,.03) 62%, rgba(18,28,43,.08) 100%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
   overflow: hidden;
 }
 #north .compass-rose {
   position: absolute; inset: 0; width: 100%; height: 100%;
   transform-origin: center; will-change: transform;
-  transition: transform 210ms ease-out;
+  transition: transform 280ms cubic-bezier(.2,.8,.2,1);
+}
+#north .compass-ring {
+  fill: none;
+  stroke: rgba(255,255,255,.12);
+  stroke-width: 1.1;
 }
 #north .compass-tick,
 #north .compass-tick-major {
-  fill: none; stroke: rgba(228,238,248,.62); stroke-width: 2.7; stroke-linecap: round;
+  fill: none;
+  stroke: rgba(240,246,255,.50);
+  stroke-width: 2.35;
+  stroke-linecap: round;
 }
-#north .compass-tick-major { stroke: #e7f0f9; stroke-width: 3.2; }
-#north .compass-tip { fill: #f35b5d; stroke: none; }
+#north .compass-tick-major {
+  stroke: rgba(252,255,255,.82);
+  stroke-width: 2.9;
+}
+#north .compass-tip {
+  fill: #ff5b4f;
+  filter: drop-shadow(0 1px 2px rgba(120,11,11,.30));
+}
 #north .compass-cardinal {
-  position: relative; z-index: 1; font-size: 19px; font-weight: 780;
-  letter-spacing: -.05em; line-height: 1; color: #fff;
+  position: relative; z-index: 1;
+  min-width: 1.4em;
+  text-align: center;
+  font-size: 16px; font-weight: 770; letter-spacing: -.035em;
+  line-height: 1; color: rgba(255,255,255,.98);
   text-shadow: 0 1px 3px rgba(0,0,0,.18);
 }
-#north .compass-source {
-  font-size: 8px; line-height: 10px; font-weight: 780;
-  letter-spacing: .09em; color: #cedbe7;
+body.dark #north.compass-control {
+  background: linear-gradient(180deg, rgba(104,123,150,.22), rgba(35,48,68,.34));
+  border-color: rgba(211,225,240,.20);
+  box-shadow:
+    0 10px 28px rgba(6,10,18,.34),
+    inset 0 1px 0 rgba(255,255,255,.18),
+    inset 0 -12px 22px rgba(7,13,23,.18);
 }
-#north.is-facing { background: rgba(30,61,87,.97); }
-#north.is-facing .compass-source { color: #9fdef6; }
-body.dark #north.compass-control { background: rgba(38,52,69,.97); border-color: #687789; }
-#north:focus-visible { outline-offset: 3px; }
+body.dark #north .compass-dial {
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.12), rgba(255,255,255,.03) 60%, rgba(5,10,16,.10) 100%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+}
+#north:focus-visible { outline-offset: 4px; }
 @media (prefers-reduced-motion: reduce) {
   #north .compass-rose { transition: none; }
 }
