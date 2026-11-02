@@ -100,6 +100,8 @@ $('theme').addEventListener('click',()=>{
   dark=!dark;document.body.classList.toggle('dark',dark);
   map.setStyle(mapStyle(dark));
   $('theme').setAttribute('aria-label',dark?'Switch to light map':'Switch to dark map');
+  $('theme').setAttribute('aria-pressed',String(dark));
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',dark?'#14202d':'#e9eff3');
   toast(dark?'Dark appearance':'Light appearance');
 });
 $('tilt').addEventListener('click',()=>{

@@ -101,3 +101,133 @@ body.dark #tilt.is-active{background:#29445b;border-color:#5a89af;color:#b5dffd}
   .search-modal { animation: none; }
   .control, .search-trigger, .avatar, .destination-button, .sheet-grabber, .sheet .handle { transition: none; }
 }
+
+
+/* MyArah: edge-to-edge Home Screen display and refined top controls.
+   The OS still owns the iPhone status bar; content extends under it only in
+   standalone mode when supported. Keep interactive controls below safe areas. */
+html, body {
+  min-height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.app {
+  height: 100vh; /* Fallback for browsers without dynamic viewport units */
+  height: 100dvh;
+  min-height: 0;
+}
+#map { position: absolute; inset: 0; }
+/* Soft translucent treatment over the map behind the SYSTEM status indicators.
+   This never intercepts map gestures or hides the indicators themselves. */
+.status-bar-wash {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(env(safe-area-inset-top, 0px) + 55px);
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(29,43,60,.58) 0%,
+    rgba(34,48,64,.21) 58%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 0%, black 43%, transparent 100%);
+  mask-image: linear-gradient(to bottom, black 0%, black 43%, transparent 100%);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+}
+body.dark .status-bar-wash {
+  background: linear-gradient(180deg, rgba(7,14,23,.56), rgba(7,14,23,.10) 65%, transparent);
+}
+.topbar {
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: calc(env(safe-area-inset-left, 0px) + 16px);
+  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  gap: 10px;
+  z-index: 3;
+  align-items: center;
+}
+.topbar .search-trigger {
+  min-height: 52px;
+  height: 52px;
+  border-radius: 18px;
+  padding: 0 15px;
+  gap: 11px;
+  border: 1px solid rgba(255,255,255,.76);
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 3px 14px rgba(27,42,56,.12), 0 1px 2px rgba(27,42,56,.045);
+}
+.topbar .search-icon {
+  display: inline-flex;
+  flex: none;
+}
+.topbar .search-icon svg { width: 21px; height: 21px; stroke: #667b8b; stroke-width: 1.9; }
+.topbar .search-placeholder {
+  font-size: 15px;
+  font-weight: 540;
+  letter-spacing: -.018em;
+  color: #748291;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.topbar .search-region {
+  flex: none;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .055em;
+  color: #64849c;
+  border: 1px solid rgba(82,122,151,.13);
+  background: #eef4f7;
+  padding: 5px 6px;
+  border-radius: 7px;
+}
+.topbar .theme-toggle {
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  border-radius: 18px;
+  position: relative;
+  border: 1px solid rgba(255,255,255,.76);
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 3px 14px rgba(27,42,56,.12), 0 1px 2px rgba(27,42,56,.045);
+}
+.topbar .theme-toggle svg {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  left: 50%;
+  top: 50%;
+  margin-left: -11px;
+  margin-top: -11px;
+  stroke: #40576e;
+  fill: none;
+  stroke-width: 1.85;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  transition: opacity 240ms ease, transform 320ms cubic-bezier(.2,.8,.2,1);
+}
+.topbar .theme-toggle .theme-moon { opacity: 1; transform: rotate(0deg) scale(1); }
+.topbar .theme-toggle .theme-sun { opacity: 0; transform: rotate(-45deg) scale(.65); }
+body.dark .topbar .search-trigger,
+body.dark .topbar .theme-toggle {
+  background: rgba(30,40,53,.94);
+  border-color: rgba(120,143,164,.20);
+  box-shadow: 0 3px 15px rgba(2,10,18,.24);
+}
+body.dark .topbar .search-icon svg,
+body.dark .topbar .theme-toggle svg { stroke: #e0e9f1; }
+body.dark .topbar .search-placeholder { color: #c1cfdb; }
+body.dark .topbar .search-region {
+  background: rgba(104,128,149,.19);
+  border-color: rgba(137,163,186,.19);
+  color: #afcce0;
+}
+body.dark .topbar .theme-toggle .theme-moon { opacity: 0; transform: rotate(45deg) scale(.65); }
+body.dark .topbar .theme-toggle .theme-sun { opacity: 1; transform: rotate(0deg) scale(1); }
+@media (max-width: 360px) {
+  .topbar { left: 12px; right: 12px; gap: 8px; }
+  .topbar .search-trigger { padding: 0 12px; }
+  .topbar .search-region { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .topbar .theme-toggle svg { transition: none; }
+}
