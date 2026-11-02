@@ -206,6 +206,79 @@ function setPlace(place) {
   // The panel stays compact after a destination is chosen.
   setSheetPosition('peek');
 }
+function removeRecentPlace(place, row) {
+  // Never delete the current destination or its map pin: remove only history.
+  row.classList.add('is-removing');
+  recentPlaces=recentPlaces.filter(item=>item.id!==place.id);
+  storeJson(RECENT_KEY,recentPlaces);
+  renderRecentPlaces();
+  const finish=()=>{
+    if (!$('searchInput').value.trim()) renderRecentSearch();
+  };
+  if(reducedMotion) finish();
+  else setTimeout(finish,240);
+}
+function enableRecentSwipe(row, result, deleteButton, place) {
+  // Horizontal swipe opens a Delete action; vertical scrolling stays native.
+  let gesture=null;
+  let ignoreClickUntil=0;
+  const width=88;
+  const closeOtherRows=()=>{
+    document.querySelectorAll('.recent-swipe-item.is-revealed').forEach(other=>{
+      if(other!==row) { other.classList.remove('is-revealed'); other.querySelector('.recent-delete')?.setAttribute('tabindex','-1'); }
+    });
+  };
+  function setRevealed(revealed) {
+    row.classList.toggle('is-revealed',revealed);
+    deleteButton.tabIndex=revealed?0:-1;
+    result.style.removeProperty('transform');
+  }
+  result.addEventListener('pointerdown',event=>{
+    if(event.pointerType==='mouse' && event.button!==0) return;
+    gesture={id:event.pointerId,x:event.clientX,y:event.clientY,
+      initial:row.classList.contains('is-revealed')?-width:0, dx:0, horizontal:false};
+    closeOtherRows();
+  });
+  result.addEventListener('pointermove',event=>{
+    if(!gesture || event.pointerId!==gesture.id) return;
+    const dx=event.clientX-gesture.x,dy=event.clientY-gesture.y;
+    if(!gesture.horizontal) {
+      if(Math.abs(dy)>Math.abs(dx)+7) {gesture=null;return;}
+      if(Math.abs(dx)<11 || Math.abs(dx)<Math.abs(dy)) return;
+      gesture.horizontal=true;
+      row.classList.add('is-swiping');
+    }
+    gesture.dx=dx;
+    const shift=Math.max(-width,Math.min(0,gesture.initial+dx));
+    result.style.transform=`translate3d(${shift}px,0,0)`;
+  });
+  function finishSwipe(event,cancelled=false){
+    if(!gesture || event.pointerId!==gesture.id) return;
+    const g=gesture;gesture=null;
+    row.classList.remove('is-swiping');
+    if(!g.horizontal) return;
+    ignoreClickUntil=performance.now()+420;
+    const next=cancelled ? g.initial<=-width/2 : (g.initial+g.dx<=-width/2);
+    setRevealed(next);
+  }
+  result.addEventListener('pointerup',event=>finishSwipe(event));
+  result.addEventListener('pointercancel',event=>finishSwipe(event,true));
+  result.addEventListener('click',event=>{
+    if(performance.now()<ignoreClickUntil){event.preventDefault();event.stopImmediatePropagation();return;}
+    if(row.classList.contains('is-revealed')) {
+      event.preventDefault();event.stopImmediatePropagation();setRevealed(false);
+    }
+  },true);
+  // A keyboard-accessible alternative to a swipe is always available to
+  // screen-reader users through the action's accessible name.
+  deleteButton.addEventListener('click',()=>removeRecentPlace(place,row));
+  result.setAttribute('aria-keyshortcuts','Delete Backspace');
+  result.addEventListener('keydown',event=>{
+    if(event.key==='Delete' || event.key==='Backspace') {
+      event.preventDefault();removeRecentPlace(place,row);
+    }
+  });
+}
 function appendResult(place,node,kind='search') {
   const button=document.createElement('button');button.type='button';button.className='result';
   const icon=document.createElement('span');icon.className='result-icon';icon.textContent=kind==='recent'?'↺':'⌖';
@@ -214,7 +287,15 @@ function appendResult(place,node,kind='search') {
   const detail=document.createElement('div');detail.className='result-detail';detail.textContent=place.detail;
   const arrow=document.createElement('span');arrow.className='result-arrow';arrow.textContent='›';
   info.append(name,detail);button.append(icon,info,arrow);
-  button.addEventListener('click',()=>setPlace(place));node.append(button);
+  button.addEventListener('click',()=>setPlace(place));
+  if(kind==='recent') {
+    const row=document.createElement('div');row.className='recent-swipe-item';
+    const del=document.createElement('button');del.type='button';del.className='recent-delete';
+    del.textContent='Delete';del.setAttribute('aria-label',`Remove ${place.name} from recent searches`);
+    del.tabIndex=-1;
+    row.append(del,button);node.append(row);
+    enableRecentSwipe(row,button,del,place);
+  } else node.append(button);
 }
 function setSearchStatus(message,error=false) {
   $('searchStatus').textContent=message;
@@ -232,6 +313,7 @@ function renderRecentPlaces() {
 function renderRecentSearch() {
   const node=$('results');node.replaceChildren();
   $('resultsTitle').textContent='RECENTS';
+  $('recentSwipeHint').hidden=recentPlaces.length===0;
   if(!recentPlaces.length) {
     const empty=document.createElement('p');empty.className='empty';
     empty.textContent='No recent places. Try searching for a Malaysian address, shop, or postcode.';
@@ -255,6 +337,7 @@ function closeSearch() {
   $('searchInput').blur();
 }
 function displaySearchResults(items) {
+  $('recentSwipeHint').hidden=true;
   const results=items.map(normalizeResult).filter(Boolean);
   const node=$('results');node.replaceChildren();
   $('resultsTitle').textContent=results.length?'SEARCH RESULTS':'NO RESULTS';
@@ -283,6 +366,7 @@ async function submitSearch(event) {
   searchAbort=new AbortController();
   $('searchSubmit').disabled=true;
   $('searchSubmit').textContent='Finding…';
+  $('recentSwipeHint').hidden=true;
   $('resultsTitle').textContent='SEARCHING MALAYSIA';
   $('results').replaceChildren();
   setSearchStatus('Looking for places…');
@@ -325,6 +409,7 @@ $('searchForm').addEventListener('submit',submitSearch);
 $('searchInput').addEventListener('input',()=>{
   // No network requests on input: public Nominatim forbids autocomplete.
   if($('searchInput').value.trim()) {
+    $('recentSwipeHint').hidden=true;
     $('resultsTitle').textContent='SEARCH MALAYSIA';
     $('results').replaceChildren();
     setSearchStatus('Tap Search or press the keyboard Search key.');

@@ -11,8 +11,8 @@
   <title>MyArah — Explore Malaysia</title>
   <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=myarah-search-ui-1">
-  <script type="module" src="app.js?v=myarah-search-ui-1"></script>
+  <link rel="stylesheet" href="styles.css?v=myarah-search-keyboard-2">
+  <script type="module" src="app.js?v=myarah-search-keyboard-2"></script>
 </head>
 <body>
   <main class="app" aria-label="MyArah map">
@@ -116,6 +116,7 @@
         <div class="search-panel-content">
           <p id="searchStatus" class="search-status" role="status" aria-live="polite"></p>
           <div class="modal-label" id="resultsTitle">RECENTS</div>
+          <p id="recentSwipeHint" class="recent-swipe-hint" hidden>Swipe left on a recent place to remove it.</p>
           <div id="results" class="results"></div>
           <p class="modal-footnote">Results from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> via <a href="https://nominatim.org" target="_blank" rel="noopener noreferrer">Nominatim</a>. Search runs only when you tap Search. Recent places are saved on this device.</p>
         </div>

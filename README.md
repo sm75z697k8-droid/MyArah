@@ -266,3 +266,12 @@ compass, or bottom-sheet design.
 - The free public Nominatim service is not used for autocomplete; press Search to send a query. Use a production geocoding provider before large-scale release.
 
 - The search sheet grip supports **swipe down to dismiss**; scrolling search results remains independent.
+
+
+## Search keyboard and swipe-to-remove update
+- The search bar is pinned inside the iOS **visible viewport** when the keyboard is shown. Its header remains above a separately scrollable results area; the map keeps its stable full-screen dimensions.
+- While typing, the search modal disables transformed entry animations, which can cause text field painting issues in iOS Safari.
+- Recent places: **swipe left** to reveal a **Delete** button. Tap Delete to remove that item from local recent-search history. This does **not** delete any map data or the currently selected destination.
+- Recent-history removal is local to this iPhone and needs no external service. Full search remains manually submitted to Nominatim (no per-keystroke autocomplete).
+- Contrast and readability have been preserved for both light and dark appearance. Test keyboard movement on a real iPhone as viewport behavior varies by iOS version.
+- Only the search interface, its viewport styling, and recent history controls were changed; existing traffic, GPS, 2D/3D, routing and compass features stay intact.
