@@ -1,31 +1,28 @@
-# MyArah v2 — Map UI
+# MyArah v3 — Malaysia Map UI
 
-A calmer, map-first Malaysia navigation **UI prototype**. Built with plain HTML, CSS, JavaScript and MapLibre GL JS. Designed for mobile Safari and GitHub Pages.
+A minimal, premium, iPhone-first map prototype with an interactive map. Inspired by the clarity of modern navigation apps, without using Apple branding or proprietary assets.
 
-## Files
-- `index.html`: app layout
-- `styles.css`: responsive design and animations
-- `app.js`: map, sample city selection, GPS, display controls
+## Included
+- Responsive map-first UI and iPhone safe-area support
+- Pan/zoom, five sample Malaysian city destinations, and animated map camera
+- Location button (needs browser permission and HTTPS)
+- Light and dark basemaps, tilted camera (3D perspective, **not** 3D buildings), north reset
+- Accessible search dialog, reduced-motion preferences, and proper map attribution
 
-## Upload from iPhone to GitHub
-1. Create or open your GitHub repository.
-2. Upload the four files to the **root** of the repository, replacing the old files if upgrading from v1.
-3. In **Settings → Pages**, deploy from branch `main`, folder `/(root)`.
-4. Open your GitHub Pages URL via HTTPS in Safari.
+## Publish on GitHub Pages from an iPhone
+1. Create or open a GitHub repository.
+2. Upload `index.html`, `styles.css`, `app.js`, and this `README.md` to the **root** of the repository.
+3. Go to Settings → Pages → Deploy from a branch → `main` → `/ (root)` → Save.
+4. Open the GitHub Pages URL in Safari. To install the shortcut, choose Share → Add to Home Screen.
 
-## Features
-- Interactive map with a restrained dark style and optional light map
-- Five sample Malaysian cities, including Sabah and Sarawak
-- City markers and animated map movement
-- 2D/tilted camera, north reset and current-location permission
-- Accessible search sheet with sample-city filtering
+No build step, package manager, server, or API key is required for this demo. Internet access is needed to load MapLibre and tiles from their public hosting services.
 
-## Not included (yet)
-Real address search, route drawing, directions, traffic, toll fees and continuous/background navigation. The 3D toggle changes the camera pitch; it does not create 3D buildings. This is not a turn-by-turn navigation app yet.
+## Limitations
+- Search uses only the five sample cities; not a live Malaysian addresses database.
+- No driving route, turn-by-turn navigation, traffic, spoken directions, or flood/toll data.
+- The 3D toggle tilts a raster map, it does not show extruded buildings.
+- GPS is a one-time location fix, not continuous navigation tracking.
+- Public tile/demo hosting has usage terms and limits. For a production navigation service, select a properly licensed map tile provider and routing/geocoding APIs.
 
-## External services
-- MapLibre GL JS is loaded via a CDN.
-- Map tiles are served by CARTO, with OpenStreetMap data and attribution shown on the map. Review tile provider terms and usage limits before production. Internet access is needed.
-- Geolocation generally requires a secure HTTPS origin and user permission.
-
-No API key is required for this demo. No custom backend.
+## Credits
+Map engine: [MapLibre GL JS](https://maplibre.org/). Map imagery: [CARTO basemaps](https://carto.com/basemaps/) and [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Attribution appears on the map.
