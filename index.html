@@ -47,14 +47,14 @@
         <div class="sheet-head"><div><span class="eyebrow">YOUR MAP, YOUR WAY</span><h1>Where to?</h1></div><span class="brand">My<span>Arah</span><span class="brand-dot">.</span></span></div>
       </div>
       <div id="sheetScroll" class="sheet-scroll" tabindex="0" aria-label="Destination options">
-        <button id="browse" class="destination-button"><span class="dest-circle"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.4"/></svg></span><span class="dest-content"><strong>Find a destination</strong><small>Search cities across Malaysia</small></span><span class="chevron">›</span></button>
+        <button id="browse" class="destination-button"><span class="dest-circle"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.4"/></svg></span><span class="dest-content"><strong>Find a destination</strong><small>Places, addresses and postcodes</small></span><span class="chevron">›</span></button>
         <div id="sheetExtras" class="sheet-extras" inert aria-hidden="true">
-          <div class="section-caption">EXPLORE MALAYSIA</div>
-          <div class="chips" aria-label="Popular places">
-            <button data-place="kl">Kuala Lumpur</button><button data-place="penang">George Town</button><button data-place="jb">Johor Bahru</button><button data-place="kk">Kota Kinabalu</button><button data-place="kuching">Kuching</button>
+          <div id="recentSection" class="recent-section" hidden>
+            <div class="section-caption">RECENT PLACES</div>
+            <div id="recentPlaces" class="chips" aria-label="Recently searched places"></div>
           </div>
           <button id="trafficConfigure" class="traffic-settings-row" type="button"><span class="traffic-settings-icon" aria-hidden="true">≋</span><span>Traffic settings</span><span aria-hidden="true">›</span></button>
-          <div class="sheet-footer"><div class="status-dot"></div><span id="placeSubtitle">Map ready · Malaysia</span><button id="recenter" aria-label="Show selected city">View <span aria-hidden="true">↗</span></button></div>
+          <div class="sheet-footer"><div class="status-dot"></div><span id="placeSubtitle">Map ready · Malaysia</span><button id="recenter" aria-label="Show selected place">View <span aria-hidden="true">↗</span></button></div>
         </div>
       </div>
     </section>
@@ -76,10 +76,15 @@
     </div>
     <div class="modal-backdrop" id="overlay" aria-hidden="true">
       <section class="search-modal" role="dialog" aria-modal="true" aria-label="Search destinations">
-        <div class="modal-header"><div class="modal-title">Search places</div><button class="close" id="closeSearch" aria-label="Close search">Done</button></div>
-        <label class="search-field"><svg viewBox="0 0 24 24"><circle cx="10.9" cy="10.9" r="6.5"/><path d="m16 16 4.3 4.3"/></svg><input id="searchInput" type="search" placeholder="City or state" autocomplete="off" spellcheck="false"></label>
-        <div class="modal-label">SUGGESTED DESTINATIONS</div><div id="results" class="results"></div>
-        <p class="modal-footnote">This preview searches five sample cities. Address search and real routes are coming later.</p>
+        <div class="modal-header"><div class="modal-title">Search Malaysia</div><button class="close" id="closeSearch" type="button" aria-label="Close search">Done</button></div>
+        <form id="searchForm" class="search-form" role="search">
+          <label class="search-field"><svg viewBox="0 0 24 24"><circle cx="10.9" cy="10.9" r="6.5"/><path d="m16 16 4.3 4.3"/></svg><input id="searchInput" type="search" name="q" placeholder="Place, address or postcode" aria-label="Search Malaysian places" autocomplete="off" autocapitalize="words" enterkeyhint="search" maxlength="120" spellcheck="false" required></label>
+          <button class="search-submit" id="searchSubmit" type="submit">Search</button>
+        </form>
+        <p id="searchStatus" class="search-status" role="status" aria-live="polite">Type a place and tap Search.</p>
+        <div class="modal-label" id="resultsTitle">RECENT PLACES</div>
+        <div id="results" class="results"></div>
+        <p class="modal-footnote">Results from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> via <a href="https://nominatim.org" target="_blank" rel="noopener noreferrer">Nominatim</a>. Search runs only when you tap Search. Coverage varies; directions aren't available yet. Recent places are stored on this device.</p>
       </section>
     </div>
   </main>

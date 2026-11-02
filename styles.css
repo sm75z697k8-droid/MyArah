@@ -393,3 +393,33 @@ body.dark .traffic-dialog-summary {color:#c1d0df;}
  .traffic-legend {top:calc(env(safe-area-inset-top, 0px) + 73px);}
 }
 @media(prefers-reduced-motion:reduce) {.traffic-dialog{animation:none;}}
+
+
+/* === MyArah real Malaysian search: small UI additions only. === */
+.recent-section[hidden] { display:none !important; }
+.search-form { display:flex;gap:9px;align-items:center; }
+.search-form .search-field { min-width:0;flex:1; }
+.search-form .search-field input { min-width:0; }
+.search-submit {
+  border:0;border-radius:12px;height:48px;flex:none;padding:0 16px;
+  color:#fff;background:#2c7cba;font-size:13px;font-weight:720;
+  box-shadow:0 2px 6px rgba(43,122,182,.13);
+}
+.search-submit:disabled { opacity:.6; }
+.search-status { font-size:12px;line-height:1.5;min-height:18px;color:#738697;margin:11px 2px 0; }
+.search-status.is-error { color:#b44d46; }
+.search-modal .modal-label { margin-top:19px; }
+.search-modal .result-detail {line-height:1.45;overflow-wrap:anywhere;}
+.search-modal .modal-footnote a {color:#2879ad;text-decoration:underline;text-underline-offset:2px;}
+body.dark .search-submit { background:#418dcb;color:#fff; }
+body.dark .search-status { color:#afc1d0; }
+body.dark .search-status.is-error {color:#ffaaa0;}
+body.dark .search-modal .modal-footnote a {color:#8dcaff;}
+@media (max-width:360px) {
+  .search-submit {padding:0 12px;}
+  .search-form {gap:7px;}
+  .search-field {padding:0 10px;}
+}
+@media (prefers-reduced-motion:reduce) {
+  .search-submit {transition:none;}
+}

@@ -1,20 +1,14 @@
 import * as maplibregl from 'https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs';
 
-// The five destinations are deliberately sample data, not live address search.
-const locations = [
-  {id:'kl',name:'Kuala Lumpur',state:'Wilayah Persekutuan',coords:[101.6869,3.1390],zoom:12.7},
-  {id:'penang',name:'George Town',state:'Pulau Pinang',coords:[100.3294,5.4141],zoom:12.6},
-  {id:'jb',name:'Johor Bahru',state:'Johor',coords:[103.7618,1.4927],zoom:12.7},
-  {id:'kk',name:'Kota Kinabalu',state:'Sabah',coords:[116.0735,5.9804],zoom:12.5},
-  {id:'kuching',name:'Kuching',state:'Sarawak',coords:[110.3592,1.5533],zoom:12.5}
-];
+// Default map viewpoint only; search results now come from a real geocoder.
+const INITIAL_VIEW = {center:[101.6869, 3.1390], zoom:12};
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 // CARTO now requires a key; use OpenFreeMap styles without an API key.
 // Light and dark use the same map engine and preserve the existing UI.
 const mapStyle = isDark => `https://tiles.openfreemap.org/styles/${isDark ? 'dark' : 'positron'}`;
-const map = new maplibregl.Map({container:'map',style:mapStyle(false),center:locations[0].coords,zoom:12,pitch:0,bearing:0,attributionControl:true,canvasContextAttributes:{antialias:true}});
-let dark=false,tilted=false,chosen=locations[0],selectedMarker=null,userMarker=null,toastTimer;
+const map = new maplibregl.Map({container:'map',style:mapStyle(false),center:INITIAL_VIEW.center,zoom:INITIAL_VIEW.zoom,pitch:0,bearing:0,attributionControl:true,canvasContextAttributes:{antialias:true}});
+let dark=false,tilted=false,chosen=null,selectedMarker=null,userMarker=null,toastTimer;
 
 // v4 map-only enhancement: keep the existing OpenFreeMap basemap.
 // An optional OpenFreeMap vector layer supplies real building geometry in 3D.
@@ -62,40 +56,190 @@ function toast(message){const el=$('notice');el.textContent=message;el.hidden=fa
 // Gentle ease-out for small camera changes; honor iOS Reduce Motion.
 const cameraEase = t => 1 - Math.pow(1 - t, 3);
 function motion(){return reducedMotion?0:1000}
-function setPlace(place){
+// === Real Malaysian place search. ===
+// Nominatim's public endpoint allows manually submitted, low-volume searches.
+// It explicitly forbids autocomplete. Cache repeat queries and limit calls.
+const SEARCH_ENDPOINT = 'https://nominatim.openstreetmap.org/search';
+const RECENT_KEY = 'myarahRecentPlacesV1';
+const SEARCH_CACHE_KEY = 'myarahGeocodeCacheV1';
+const SEARCH_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
+const MAX_RECENT = 7;
+let recentPlaces = readStoredArray(RECENT_KEY);
+let searchCache = readStoredObject(SEARCH_CACHE_KEY);
+let lastSearchRequest = 0;
+let searchJob = 0;
+let searchAbort = null;
+
+function readStoredArray(key) {
+  try { const value = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(value) ? value : []; }
+  catch (_) { return []; }
+}
+function readStoredObject(key) {
+  try { const value = JSON.parse(localStorage.getItem(key) || '{}'); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
+  catch (_) { return {}; }
+}
+function storeJson(key,value) {
+  try { localStorage.setItem(key,JSON.stringify(value)); } catch (_) {}
+}
+function zoomForResult(item) {
+  const type = item.addresstype || item.type || '';
+  if (type === 'country') return 5;
+  if (type === 'state' || type === 'region') return 8;
+  if (['city','municipality','county','district'].includes(type)) return 12;
+  if (['town','suburb','village','neighbourhood'].includes(type)) return 14;
+  return 16.5;
+}
+function normalizeResult(item) {
+  const lng=Number(item.lon), lat=Number(item.lat);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  const full=String(item.display_name||'').trim();
+  if(!full) return null;
+  const name=String(item.name||full.split(',')[0]||'Place').trim().slice(0,130);
+  const detail=full.slice(0,260);
+  return {id:String(item.place_id||`${lat}:${lng}`),name,detail,coords:[lng,lat],zoom:zoomForResult(item)};
+}
+function setPlace(place) {
   chosen=place;
   map.flyTo({center:place.coords,...cameraFor(place.zoom),duration:motion(),essential:true});
-  if(selectedMarker)selectedMarker.remove();
+  if(selectedMarker) selectedMarker.remove();
   const pin=document.createElement('div');pin.className='city-marker';pin.setAttribute('aria-label',place.name);
   selectedMarker=new maplibregl.Marker({element:pin}).setLngLat(place.coords).addTo(map);
-  $('placeSubtitle').textContent=`${place.name} · ${place.state}`;
-  document.querySelectorAll('[data-place]').forEach(button=>button.classList.toggle('active',button.dataset.place===place.id));
+  $('placeSubtitle').textContent=place.name;
+  recentPlaces=[place,...recentPlaces.filter(item=>item.id!==place.id)].slice(0,MAX_RECENT);
+  storeJson(RECENT_KEY,recentPlaces);
+  renderRecentPlaces();
   closeSearch();
+  // The panel stays compact after a destination is chosen.
+  setSheetPosition('peek');
 }
-function renderResults(term=''){
-  const node=$('results');node.replaceChildren();
-  const matches=locations.filter(place=>`${place.name} ${place.state}`.toLocaleLowerCase().includes(term.trim().toLocaleLowerCase()));
-  if(!matches.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='No sample cities found. Try Kuala Lumpur or Penang.';node.append(empty);return}
-  matches.forEach(place=>{
-    const button=document.createElement('button');button.type='button';button.className='result';
-    const icon=document.createElement('span');icon.className='result-icon';icon.textContent='⌖';
-    const info=document.createElement('span');info.className='result-text';
-    const name=document.createElement('div');name.className='result-title';name.textContent=place.name;
-    const state=document.createElement('div');state.className='result-detail';state.textContent=place.state;
-    const arrow=document.createElement('span');arrow.className='result-arrow';arrow.textContent='›';
-    info.append(name,state);button.append(icon,info,arrow);button.addEventListener('click',()=>setPlace(place));node.append(button);
+function appendResult(place,node,kind='search') {
+  const button=document.createElement('button');button.type='button';button.className='result';
+  const icon=document.createElement('span');icon.className='result-icon';icon.textContent=kind==='recent'?'↺':'⌖';
+  const info=document.createElement('span');info.className='result-text';
+  const name=document.createElement('div');name.className='result-title';name.textContent=place.name;
+  const detail=document.createElement('div');detail.className='result-detail';detail.textContent=place.detail;
+  const arrow=document.createElement('span');arrow.className='result-arrow';arrow.textContent='›';
+  info.append(name,detail);button.append(icon,info,arrow);
+  button.addEventListener('click',()=>setPlace(place));node.append(button);
+}
+function setSearchStatus(message,error=false) {
+  $('searchStatus').textContent=message;
+  $('searchStatus').classList.toggle('is-error',error);
+}
+function renderRecentPlaces() {
+  const section=$('recentSection'), chips=$('recentPlaces');
+  section.hidden=recentPlaces.length===0;
+  chips.replaceChildren();
+  recentPlaces.forEach(place=>{
+    const button=document.createElement('button');button.type='button';button.textContent=place.name;
+    button.addEventListener('click',()=>setPlace(place));chips.append(button);
   });
 }
-function openSearch(){const overlay=$('overlay');overlay.classList.add('open');overlay.setAttribute('aria-hidden','false');$('searchInput').value='';renderResults();setTimeout(()=>$('searchInput').focus(),140)}
-function closeSearch(){const overlay=$('overlay');overlay.classList.remove('open');overlay.setAttribute('aria-hidden','true')}
+function renderRecentSearch() {
+  const node=$('results');node.replaceChildren();
+  $('resultsTitle').textContent='RECENT PLACES';
+  if(!recentPlaces.length) {
+    const empty=document.createElement('p');empty.className='empty';
+    empty.textContent='No recent places. Try searching for a Malaysian address, shop, or postcode.';
+    node.append(empty);
+  } else recentPlaces.forEach(place=>appendResult(place,node,'recent'));
+  setSearchStatus('Type a place and tap Search.');
+}
+function openSearch() {
+  const overlay=$('overlay');overlay.classList.add('open');overlay.setAttribute('aria-hidden','false');
+  $('searchInput').value='';renderRecentSearch();
+  setTimeout(()=>$('searchInput').focus(),140);
+}
+function closeSearch() {
+  $('overlay').classList.remove('open');$('overlay').setAttribute('aria-hidden','true');
+  searchJob++;
+  searchAbort?.abort();searchAbort=null;
+  $('searchSubmit').disabled=false;
+  $('searchSubmit').textContent='Search';
+  $('searchInput').blur();
+}
+function displaySearchResults(items) {
+  const results=items.map(normalizeResult).filter(Boolean);
+  const node=$('results');node.replaceChildren();
+  $('resultsTitle').textContent=results.length?'SEARCH RESULTS':'NO RESULTS';
+  if(results.length) {
+    results.forEach(place=>appendResult(place,node));
+    setSearchStatus(`${results.length} result${results.length===1?'':'s'} in Malaysia. Select a place to view it on the map.`);
+  } else {
+    const empty=document.createElement('p');empty.className='empty';
+    empty.textContent='No matching places found. Try a more specific name or add a city/state.';
+    node.append(empty);
+    setSearchStatus('No results found.');
+  }
+}
+async function submitSearch(event) {
+  event.preventDefault();
+  const query=$('searchInput').value.trim().replace(/\s+/g,' ');
+  if(query.length<2) {setSearchStatus('Enter at least two characters.',true);return;}
+  const normalizedQuery=query.toLocaleLowerCase('en-MY');
+  const cached=searchCache[normalizedQuery];
+  if(cached && Date.now()-cached.time<SEARCH_CACHE_TTL && Array.isArray(cached.items)) {
+    displaySearchResults(cached.items);
+    return;
+  }
+  const job=++searchJob;
+  searchAbort?.abort();
+  searchAbort=new AbortController();
+  $('searchSubmit').disabled=true;
+  $('searchSubmit').textContent='Finding…';
+  $('resultsTitle').textContent='SEARCHING MALAYSIA';
+  $('results').replaceChildren();
+  setSearchStatus('Looking for places…');
+  try {
+    // Absolute public-server limit: at most one new request each 1.2 seconds
+    // from this browser tab. Never request on each keystroke.
+    const delay=Math.max(0,lastSearchRequest+1250-Date.now());
+    if(delay) await new Promise(resolve=>setTimeout(resolve,delay));
+    if(job!==searchJob) return;
+    const url=new URL(SEARCH_ENDPOINT);
+    url.search=new URLSearchParams({q:query,format:'jsonv2',countrycodes:'my',limit:'8',addressdetails:'1','accept-language':'ms,en'}).toString();
+    lastSearchRequest=Date.now();
+    const response=await fetch(url.toString(),{
+      signal:searchAbort.signal,
+      headers:{Accept:'application/json'}
+    });
+    if(!response.ok) throw new Error(response.status===429?'Search limit reached. Try again shortly.':`Search service unavailable (${response.status}).`);
+    const items=await response.json();
+    if(!Array.isArray(items)) throw new Error('Search returned an unexpected response.');
+    if(job!==searchJob) return;
+    searchCache[normalizedQuery]={time:Date.now(),items};
+    // Small, bounded local cache. Do not write private API keys into source.
+    const keys=Object.keys(searchCache).sort((a,b)=>searchCache[b].time-searchCache[a].time);
+    keys.slice(25).forEach(key=>delete searchCache[key]);
+    storeJson(SEARCH_CACHE_KEY,searchCache);
+    displaySearchResults(items);
+  } catch(error) {
+    if(error.name==='AbortError'||job!==searchJob) return;
+    $('resultsTitle').textContent='SEARCH UNAVAILABLE';
+    setSearchStatus(error instanceof TypeError?'Could not reach the search service. Check your connection.':error.message,true);
+  } finally {
+    if(job===searchJob){$('searchSubmit').disabled=false;$('searchSubmit').textContent='Search';searchAbort=null;}
+  }
+}
 $('openSearch').addEventListener('click',openSearch);
 $('browse').addEventListener('click',openSearch);
 $('closeSearch').addEventListener('click',closeSearch);
 $('overlay').addEventListener('click',event=>{if(event.target===$('overlay'))closeSearch()});
-document.addEventListener('keydown',event=>{if(event.key==='Escape')closeSearch()});
-$('searchInput').addEventListener('input',event=>renderResults(event.target.value));
-document.querySelectorAll('[data-place]').forEach(button=>button.addEventListener('click',()=>setPlace(locations.find(place=>place.id===button.dataset.place))));
-$('recenter').addEventListener('click',()=>map.flyTo({center:chosen.coords,...cameraFor(chosen.zoom),duration:motion()}));
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('overlay').classList.contains('open'))closeSearch()});
+$('searchForm').addEventListener('submit',submitSearch);
+$('searchInput').addEventListener('input',()=>{
+  // No network requests on input: public Nominatim forbids autocomplete.
+  if($('searchInput').value.trim()) {
+    $('resultsTitle').textContent='SEARCH MALAYSIA';
+    $('results').replaceChildren();
+    setSearchStatus('Tap Search or press the keyboard Search key.');
+  } else renderRecentSearch();
+});
+$('recenter').addEventListener('click',()=>map.flyTo({
+  center:chosen?chosen.coords:INITIAL_VIEW.center,
+  ...cameraFor(chosen?chosen.zoom:INITIAL_VIEW.zoom),duration:motion()
+}));
+renderRecentPlaces();
 $('theme').addEventListener('click',()=>{
   dark=!dark;document.body.classList.toggle('dark',dark);
   map.setStyle(mapStyle(dark));
@@ -252,8 +396,7 @@ $('locate').addEventListener('click', () => {
   });
 });
 map.on('error',event=>{console.warn('Map rendering error',event.error);if(event.sourceId==='myarah-traffic-source'){if(trafficOn){turnTrafficOff();toast('Traffic layer unavailable. Check Traffic settings.')}return;}toast('Map tiles unavailable. Check your internet connection.')});
-renderResults();
-setPlace(locations[0]);
+// Start with the clean map. Markers only appear for real search results.
 
 
 // Bottom sheet interaction (only UI changes; map engine and existing controls stay intact).
@@ -406,13 +549,7 @@ sheetDragArea.addEventListener('click', event => {
   setSheetPosition(sheetPositions[nextIndex]);
 });
 
-// Show more map again once the user chooses a suggested city.
-document.querySelectorAll('.chips [data-place]').forEach(button => {
-  button.addEventListener('click', () => setSheetPosition('peek'));
-});
-$('results').addEventListener('click', event => {
-  if (event.target.closest('.result')) setSheetPosition('peek');
-});
+// Selecting a real search result or recent place collapses the sheet in setPlace().
 
 window.addEventListener('resize', () => {
   if (!sheetGesture) setSheetPosition(sheetPosition);

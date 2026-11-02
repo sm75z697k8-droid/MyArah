@@ -1,4 +1,4 @@
-# MyArah v4 — Compact Scrollable Bottom Sheet
+# MyArah — Real Malaysia Place Search (built on your latest project)
 
 A minimal, premium, iPhone-first map prototype with an interactive map. Inspired by the clarity of modern navigation apps, without using Apple branding or proprietary assets.
 
@@ -8,7 +8,7 @@ A minimal, premium, iPhone-first map prototype with an interactive map. Inspired
 - **NEW:** smoother bottom-sheet settling with frame-batched touch dragging, quick-flick behavior, and softer transitions
 - **NEW:** distinctive circular compass rose icon (separate from the GPS location arrow)
 - Gentler 2D/3D and north-reset camera movements, respecting Reduce Motion
-- Pan/zoom, five sample Malaysian city destinations, and animated map camera
+- Pan/zoom and real Malaysia address/place lookup with animated map camera and destination pins
 - Location button (needs browser permission and HTTPS)
 - Light and dark OpenFreeMap basemaps, north reset, plus 2D and 3D map modes with *real building extrusions where OpenStreetMap geometry exists*
 - Accessible search dialog, reduced-motion preferences, and proper map attribution
@@ -19,19 +19,19 @@ A minimal, premium, iPhone-first map prototype with an interactive map. Inspired
 3. Go to Settings → Pages → Deploy from a branch → `main` → `/ (root)` → Save.
 4. Open the GitHub Pages URL in Safari. To install the shortcut, choose Share → Add to Home Screen.
 
-No build step, package manager, server, or API key is required for this demo. Internet access is needed for MapLibre, OpenFreeMap map tiles and 3D building vector data. Switching light/dark rebuilds the 3D overlay automatically.
+No build step, package manager, server, or API key is required for basic place search. TomTom traffic still requires your own key on your device. Internet access is needed for MapLibre, OpenFreeMap map tiles and 3D building vector data. Switching light/dark rebuilds the 3D overlay automatically.
 
 ## Using the bottom panel
 - At launch, the sheet takes up only enough space for **Where to?** and **Find a destination**.
-- Drag the handle or the heading upward to reveal the Malaysian city shortcuts; drag again to expand. Drag downward to collapse.
+- Drag the handle or the heading upward to reveal recent places (after you have searched for some); drag again to expand. Drag downward to collapse.
 - Tap the small handle to cycle through **compact → medium → expanded → compact**.
 - Once expanded, scroll **inside** the panel vertically; the map behind it remains pannable outside the panel.
-- City selection collapses the sheet to show the map again.
+- Selecting a search result or recent place collapses the sheet to show the map again.
 - This polish preserves the existing OpenFreeMap map, 2D/3D toggle, GPS, dark mode, search, bottom panel design, and original project structure.
 
 ## Limitations
-- Search uses only the five sample cities; not a live Malaysian addresses database.
-- No driving route, turn-by-turn navigation, traffic, spoken directions, or flood/toll data.
+- Search uses Nominatim/OpenStreetMap place data and may miss businesses, addresses, or postcodes that have not been mapped. The public endpoint is for low-volume testing, not a scaled production app.
+- Live traffic overlay is optional with a TomTom key. Driving routes, turn-by-turn navigation, spoken directions, flood/toll data and traffic-aware routing are not yet implemented.
 - The 3D toggle tilts and rotates the map, zooms closer when needed, and overlays real extruded building geometry from OpenFreeMap where mapped. Some locations have no 3D building geometry; this is **not** 3D terrain.
 - GPS is a one-time location fix, not continuous navigation tracking.
 - Public tile/demo hosting has usage terms and limits. For a production navigation service, select a properly licensed map tile provider and routing/geocoding APIs.
@@ -59,8 +59,7 @@ Map engine: [MapLibre GL JS](https://maplibre.org/). Basemaps and 3D building ge
   A Home Screen web app uses the large viewport (`100lvh` where supported),
   while Safari still uses the responsive `100dvh` height.
 - A viewport resize hook resizes the WebGL map when iOS changes visible bounds.
-- When updating, replace `styles.css` and `app.js`. You can leave `index.html`
-  exactly as it was, but the ZIP includes the unchanged file for convenience.
+- The earlier bottom-gap fix updated `styles.css` and `app.js`; for **this real-search release**, replace all four files from the included ZIP.
 - **Important iOS limitation:** Some iOS 26/27 versions have a WebKit bug that
   reserves an OS-owned strip below the actual webpage viewport in Home Screen
   apps. That strip cannot be filled with interactive map tiles by CSS or JS;
@@ -107,3 +106,18 @@ This version intentionally **does not include your TomTom API key** in any HTML,
 A webpage cannot securely hide a key from browser network requests, even when the key is stored only locally. Restrict the TomTom key to your GitHub Pages domain and to the traffic service in TomTom's key management settings. For a large public launch, proxy requests through a backend that protects the key. Never publish the key in a repository or share screenshots of the Traffic settings with the key visible.
 
 This update does **not** test, validate, or use up quota from your specific supplied API key. Only your browser can make the live request after you paste it.
+
+## NEW — Real Malaysia search (sample cities removed)
+
+- Tap the top **Search Malaysia** bar or bottom **Find a destination** button.
+- Enter a Malaysian business, landmark, street address, town, or postcode and press **Search** on the keyboard or the blue **Search** button.
+- The app queries OpenStreetMap Nominatim, restricted to Malaysia (`countrycodes=my`), and displays matching names and full addresses. Select one to drop a map pin and fly to it; the bottom panel returns to compact mode.
+- The old hard-coded five city samples have been **removed**. The bottom panel now shows up to seven **recently selected places** after your first search.
+- Repeat searches are cached locally for seven days; your recent places are stored only in your browser's local storage on that device.
+- Search is **submit-only** (no automatic requests while typing). This follows the public Nominatim service policy (no autocomplete, at most 1 request/second). An inter-request delay is enforced. Results and request availability can vary by coverage and service load.
+- Nominatim attribution appears in the search panel. Search queries go to a third-party server, so avoid entering sensitive information. This shared public API is intended for limited **development and testing**. **For a public or high-traffic app**, replace it with a contracted geocoding service (or your own hosted instance). Do not rely on the donated public service for production.
+- No new API key is needed for the prototype. Your existing TomTom traffic connection remains separate and unchanged.
+- **Place search is not routing.** Selecting a result displays a pin on the map; driving directions, travel time, and live navigation have not been built yet.
+
+Official policy: https://operations.osmfoundation.org/policies/nominatim/
+API documentation: https://nominatim.org/release-docs/latest/api/Search/
