@@ -3,34 +3,51 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#f8f9fb">
+  <meta name="theme-color" content="#f5f6f7">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>MyArah — Maps</title>
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.14.0/dist/maplibre-gl.css">
+  <meta name="description" content="MyArah — discover Malaysia, beautifully.">
+  <title>MyArah — Explore Malaysia</title>
+  <link rel="preconnect" href="https://basemaps.cartocdn.com">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
   <link rel="stylesheet" href="styles.css">
-  <script src="https://unpkg.com/maplibre-gl@5.14.0/dist/maplibre-gl.js" defer></script>
-  <script src="app.js" defer></script>
+  <script type="module" src="app.js"></script>
 </head>
 <body>
-  <main class="app">
+  <main class="app" aria-label="MyArah map">
     <div id="map" aria-label="Interactive map of Malaysia"></div>
-    <div class="topbar">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">↗</span><span>MyArah</span><span class="version">BETA</span></div>
-      <button class="search-button" id="searchOpen" type="button" aria-label="Choose a location"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg><span>Where to?</span><span class="search-shortcut">Search</span></button>
+    <header class="topbar">
+      <button class="search-trigger surface" id="openSearch" aria-label="Search places">
+        <span class="search-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.9" cy="10.9" r="6.5"/><path d="m16 16 4.3 4.3"/></svg></span>
+        <span class="search-placeholder">Search Malaysia</span>
+        <span class="search-shortcut" aria-hidden="true">⌕</span>
+      </button>
+      <button class="avatar surface" id="theme" aria-label="Switch to dark map" title="Change appearance"><svg viewBox="0 0 24 24"><path d="M20 15.7A8 8 0 0 1 8.3 4 8 8 0 1 0 20 15.7Z"/></svg></button>
+    </header>
+    <div class="map-controls">
+      <button id="locate" class="control surface primary-control" aria-label="Show my location" title="My location"><svg viewBox="0 0 24 24"><path d="m12 3-7.5 17L12 16l7.5 4L12 3Z"/></svg></button>
+      <button id="tilt" class="control surface text-control" aria-label="Switch to 3D map" aria-pressed="false" title="2D / 3D map">3D</button>
+      <button id="north" class="control surface" aria-label="Point map north" title="Reset compass"><svg viewBox="0 0 24 24"><path d="m12 3 5 18-5-4-5 4 5-18Z"/></svg></button>
     </div>
-    <div class="controls" aria-label="Map controls">
-      <div class="control-group"><button class="icon-button" id="locate" title="My location" aria-label="My location"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/></svg></button><button class="icon-button" id="north" title="Face north" aria-label="Face north"><svg viewBox="0 0 24 24"><path d="m12 3 6 18-6-4-6 4z"/></svg></button></div>
-      <div class="control-group"><button class="icon-button" id="zoomIn" aria-label="Zoom in">+</button><button class="icon-button" id="zoomOut" aria-label="Zoom out">−</button></div>
-    </div>
-    <section class="bottom-sheet" aria-label="Map options">
-      <div class="grabber" aria-hidden="true"></div>
-      <div class="heading-row"><div><span class="eyebrow">EXPLORE MALAYSIA</span><h1>Discover your way.</h1></div><div class="status"><span class="status-dot"></span> Map preview</div></div>
-      <div class="segmented" role="group" aria-label="Map perspective"><button id="mode2d" class="active" type="button" aria-pressed="true">2D</button><button id="mode3d" type="button" aria-pressed="false">3D</button></div>
-      <div class="sheet-bottom"><span id="modeHelp">Classic top-down view</span><button id="themeToggle" type="button" class="theme-button" aria-label="Toggle light or dark map"><svg viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2z"/></svg><span>Dark map</span></button></div>
+    <section class="sheet surface" aria-label="Explore destinations">
+      <div class="handle" aria-hidden="true"></div>
+      <div class="sheet-head"><div><span class="eyebrow">YOUR MAP, YOUR WAY</span><h1>Where to?</h1></div><span class="brand">My<span>Arah</span><span class="brand-dot">.</span></span></div>
+      <button id="browse" class="destination-button"><span class="dest-circle"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.4"/></svg></span><span class="dest-content"><strong>Find a destination</strong><small>Search cities across Malaysia</small></span><span class="chevron">›</span></button>
+      <div class="section-caption">EXPLORE MALAYSIA</div>
+      <div class="chips" aria-label="Popular places">
+        <button data-place="kl">Kuala Lumpur</button><button data-place="penang">George Town</button><button data-place="jb">Johor Bahru</button><button data-place="kk">Kota Kinabalu</button><button data-place="kuching">Kuching</button>
+      </div>
+      <div class="sheet-footer"><div class="status-dot"></div><span id="placeSubtitle">Map ready · Malaysia</span><button id="recenter" aria-label="Show selected city">View <span aria-hidden="true">↗</span></button></div>
     </section>
-    <div class="search-overlay" id="searchOverlay" hidden><section class="search-panel" role="dialog" aria-modal="true" aria-label="Choose a place"><div class="search-panel-header"><strong>Explore Malaysia</strong><button id="searchClose" class="close-button" aria-label="Close search">Done</button></div><label for="placeSearch">Search sample cities</label><input id="placeSearch" type="search" placeholder="City or state" autocomplete="off"><div id="results" class="results"></div><p class="search-note">City shortcuts only — address and business search is coming later.</p></section></div>
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div class="toast" id="notice" role="status" aria-live="polite" hidden></div>
+    <div class="modal-backdrop" id="overlay" aria-hidden="true">
+      <section class="search-modal" role="dialog" aria-modal="true" aria-label="Search destinations">
+        <div class="modal-header"><div class="modal-title">Search places</div><button class="close" id="closeSearch" aria-label="Close search">Done</button></div>
+        <label class="search-field"><svg viewBox="0 0 24 24"><circle cx="10.9" cy="10.9" r="6.5"/><path d="m16 16 4.3 4.3"/></svg><input id="searchInput" type="search" placeholder="City or state" autocomplete="off" spellcheck="false"></label>
+        <div class="modal-label">SUGGESTED DESTINATIONS</div><div id="results" class="results"></div>
+        <p class="modal-footnote">This preview searches five sample cities. Address search and real routes are coming later.</p>
+      </section>
+    </div>
   </main>
 </body>
 </html>
