@@ -311,3 +311,85 @@ body.dark, body.dark .app, body.dark #map { background-color: #172431; }
 @media (prefers-reduced-motion: reduce) {
   .myarah-heading-cone { transition: none; }
 }
+
+
+/* === MyArah live-traffic add-on. Does not alter the existing map UI. === */
+.traffic-control {position:relative;}
+.traffic-control svg {width:26px;height:26px;stroke-width:2.2;}
+.traffic-control svg .traffic-mini-green {stroke:#31af74;stroke-width:3.4;}
+.traffic-control svg .traffic-mini-yellow {stroke:#e6aa30;stroke-width:3.4;}
+.traffic-control svg .traffic-mini-red {stroke:#e06657;stroke-width:3.4;}
+.traffic-control.is-active {border-color:rgba(63,141,214,.42);background:#e7f2ff;}
+body.dark .traffic-control.is-active {background:#29445b;border-color:#5a89af;}
+.traffic-legend[hidden],.traffic-dialog-backdrop[hidden] {display:none !important;}
+.traffic-legend {
+  position:absolute;left:16px;
+  top:calc(env(safe-area-inset-top, 0px) + 78px);
+  z-index:2; min-width:170px;max-width:calc(100vw - 105px);
+  padding:10px 12px;border-radius:15px;
+  border:1px solid rgba(255,255,255,.66);
+  font-size:11px;line-height:1.5;
+  color:#405161;
+}
+.traffic-legend-top {display:flex;align-items:center;gap:7px;font-weight:700;font-size:12px;}
+.traffic-live-dot {width:7px;height:7px;border-radius:50%;background:#34b47a;}
+.traffic-legend-top button {margin-left:auto;width:26px;height:26px;padding:3px;background:transparent;border:0;color:#6d8191;display:grid;place-items:center;}
+.traffic-legend-top button svg {width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;}
+.traffic-legend-colors,.traffic-color-guide {display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.traffic-legend-colors {gap:8px;font-size:10px;margin-top:2px;}
+.traffic-legend-colors span,.traffic-color-guide span {display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}
+.traffic-swatch {display:inline-block;width:15px;height:5px;border-radius:4px;background:#31a55b;}
+.traffic-swatch.slow {background:#e9b12e;}
+.traffic-swatch.jam {background:#e5432f;}
+body.dark .traffic-legend {color:#dce7f2;}
+body.dark .traffic-legend-top button {color:#b7c5d3;}
+.traffic-settings-row {
+ display:flex;align-items:center;gap:10px;width:100%;padding:12px 3px 3px;
+ background:transparent;border:0;color:#45627c;font-size:12px;font-weight:650;
+ text-align:left;
+}
+.traffic-settings-row span:nth-child(2) {flex:1;}
+.traffic-settings-icon {font-size:21px;color:#4284bd;line-height:1;}
+.traffic-settings-row span:last-child {font-size:24px;color:#99a6b2;font-weight:300;}
+body.dark .traffic-settings-row {color:#d7e4f0;}
+.traffic-dialog-backdrop {position:absolute;inset:0;z-index:21;background:rgba(15,28,43,.38);display:flex;align-items:flex-end;justify-content:center;}
+.traffic-dialog {
+ background:#fcfdfe;box-shadow:0 -12px 45px #12243740;
+ width:100%;max-height:calc(100dvh - env(safe-area-inset-top, 0px) - 18px);
+ overflow-y:auto;border-radius:25px 25px 0 0;
+ padding:23px 20px calc(env(safe-area-inset-bottom,0px) + 23px);
+ animation:myarahModalIn .28s cubic-bezier(.2,.88,.22,1) both;
+}
+.traffic-dialog-header {display:flex;align-items:center;justify-content:space-between;gap:15px;}
+.traffic-dialog-kicker {font-size:10px;font-weight:750;letter-spacing:.10em;color:#8193a6;}
+.traffic-dialog h2 {font-size:25px;letter-spacing:-.04em;margin:4px 0 0;color:#22303f;}
+.traffic-dialog-close {border:0;background:transparent;color:#247fbf;font-weight:700;padding:9px 2px;font-size:14px;}
+.traffic-dialog-summary {font-size:13px;line-height:1.55;color:#647487;margin:16px 0 14px;}
+.traffic-color-guide {background:#f0f5f8;padding:12px;border-radius:13px;color:#3f5567;font-size:12px;margin-bottom:17px;}
+.traffic-form {display:flex;flex-direction:column;gap:9px;}
+.traffic-form label {font-size:12px;font-weight:700;color:#33485e;}
+.traffic-key-input {display:flex;align-items:center;gap:7px;border:1px solid #dfe7ec;border-radius:12px;background:#f6f8fa;padding:3px 10px;min-height:46px;}
+.traffic-key-input input {font-size:16px;min-width:0;width:100%;flex:1;background:transparent;border:0;outline:0;color:#22303f;}
+.traffic-key-input button {border:0;background:transparent;color:#397db8;font-size:12px;font-weight:650;padding:8px;}
+.traffic-message {margin:0;color:#778a9b;font-size:11px;line-height:1.5;min-height:27px;}
+.traffic-message.is-error {color:#b63c34;}
+.traffic-connect {background:#277ec2;color:white;border:0;border-radius:12px;padding:14px;font-size:14px;font-weight:700;}
+.traffic-connect:disabled {opacity:.6;}
+.traffic-dialog-footer {display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:center;margin-top:18px;}
+.traffic-dialog-footer a {color:#327fb9;font-size:12px;text-decoration:none;}
+.traffic-forget {background:transparent;border:0;color:#a45050;font-size:12px;padding:8px 0;}
+.traffic-privacy {font-size:10px;line-height:1.55;color:#8a9ba9;margin:14px 0 0;}
+body.dark .traffic-dialog {background:#182431;}
+body.dark .traffic-dialog h2,body.dark .traffic-form label {color:#e9f2fb;}
+body.dark .traffic-color-guide,body.dark .traffic-key-input {background:#263748;border-color:#3e5063;color:#dce7ee;}
+body.dark .traffic-key-input input {color:#edf4fa;}
+body.dark .traffic-dialog-summary {color:#c1d0df;}
+@media(min-width:700px) {
+ .traffic-dialog-backdrop {align-items:center;}
+ .traffic-dialog {max-width:450px;border-radius:24px;padding-bottom:25px;}
+ .traffic-legend {left:22px;}
+}
+@media(max-height:690px) and (max-width:699px) {
+ .traffic-legend {top:calc(env(safe-area-inset-top, 0px) + 73px);}
+}
+@media(prefers-reduced-motion:reduce) {.traffic-dialog{animation:none;}}

@@ -30,10 +30,15 @@
       </button>
     </header>
     <div class="map-controls">
+      <button id="trafficToggle" class="control surface traffic-control" type="button" aria-label="Turn on live traffic" aria-pressed="false" title="Live traffic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16M4 12h16M4 17.5h16"/><path class="traffic-mini-green" d="M4 6.5h7"/><path class="traffic-mini-yellow" d="M12 12h8"/><path class="traffic-mini-red" d="M4 17.5h11"/></svg></button>
       <button id="locate" class="control surface primary-control" aria-label="Show my location" title="My location"><svg viewBox="0 0 24 24"><path d="m12 3-7.5 17L12 16l7.5 4L12 3Z"/></svg></button>
       <button id="tilt" class="control surface text-control" aria-label="Switch to 3D map" aria-pressed="false" title="2D / 3D map">3D</button>
       <button id="north" class="control surface" aria-label="Point map north" title="Reset compass"><svg class="compass-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.1"/><path class="compass-north" d="M12 5.5 15.2 12 12 10.9 8.8 12 12 5.5Z"/><path class="compass-south" d="M12 18.5 8.8 12 12 13.1 15.2 12 12 18.5Z"/></svg></button>
     </div>
+    <aside id="trafficLegend" class="traffic-legend surface" hidden aria-label="Current traffic colors">
+      <div class="traffic-legend-top"><span class="traffic-live-dot" aria-hidden="true"></span><span id="trafficLiveLabel">Traffic on</span><button id="trafficSettings" type="button" aria-label="Traffic settings" title="Traffic settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.9v2M12 19.1v2M4.3 4.3l1.5 1.5M18.2 18.2l1.5 1.5M2.9 12h2M19.1 12h2M4.3 19.7l1.5-1.5M18.2 5.8l1.5-1.5"/></svg></button></div>
+      <div class="traffic-legend-colors"><span><i class="traffic-swatch clear"></i>Clear</span><span><i class="traffic-swatch slow"></i>Slow</span><span><i class="traffic-swatch jam"></i>Jam</span></div>
+    </aside>
     <section id="bottomSheet" class="sheet surface" data-sheet-state="peek" aria-label="Explore destinations">
       <div id="sheetDragArea" class="sheet-drag-area">
         <button id="sheetGrabber" class="sheet-grabber" type="button" aria-label="Expand destinations panel" aria-expanded="false" aria-controls="sheetScroll">
@@ -48,11 +53,27 @@
           <div class="chips" aria-label="Popular places">
             <button data-place="kl">Kuala Lumpur</button><button data-place="penang">George Town</button><button data-place="jb">Johor Bahru</button><button data-place="kk">Kota Kinabalu</button><button data-place="kuching">Kuching</button>
           </div>
+          <button id="trafficConfigure" class="traffic-settings-row" type="button"><span class="traffic-settings-icon" aria-hidden="true">≋</span><span>Traffic settings</span><span aria-hidden="true">›</span></button>
           <div class="sheet-footer"><div class="status-dot"></div><span id="placeSubtitle">Map ready · Malaysia</span><button id="recenter" aria-label="Show selected city">View <span aria-hidden="true">↗</span></button></div>
         </div>
       </div>
     </section>
     <div class="toast" id="notice" role="status" aria-live="polite" hidden></div>
+    <div class="traffic-dialog-backdrop" id="trafficDialog" hidden>
+      <section class="traffic-dialog surface" role="dialog" aria-modal="true" aria-labelledby="trafficDialogTitle">
+        <div class="traffic-dialog-header"><div><span class="traffic-dialog-kicker">MYARAH · MAP LAYERS</span><h2 id="trafficDialogTitle">Live traffic</h2></div><button id="trafficClose" type="button" class="traffic-dialog-close" aria-label="Close traffic settings">Done</button></div>
+        <p class="traffic-dialog-summary">Color the roads using actual traffic speeds, relative to normal free-flow conditions.</p>
+        <div class="traffic-color-guide" aria-label="Traffic colors"><span><i class="traffic-swatch clear"></i>Clear</span><span><i class="traffic-swatch slow"></i>Slower</span><span><i class="traffic-swatch jam"></i>Heavy jam</span></div>
+        <form id="trafficForm" class="traffic-form">
+          <label for="trafficApiKey">TomTom Traffic API key</label>
+          <div class="traffic-key-input"><input id="trafficApiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your API key" required><button id="trafficKeyVisibility" type="button" aria-label="Show API key">Show</button></div>
+          <p id="trafficMessage" class="traffic-message" role="status" aria-live="polite">A key is needed to display real traffic. No simulated congestion is shown.</p>
+          <button type="submit" id="trafficConnect" class="traffic-connect">Connect traffic</button>
+        </form>
+        <div class="traffic-dialog-footer"><a href="https://docs.tomtom.com/platform/documentation/my-tomtom/how-to-get-a-tomtom-api-key" target="_blank" rel="noopener noreferrer">How to get a free-tier API key ↗</a><button type="button" id="trafficForget" class="traffic-forget">Forget key</button></div>
+        <p class="traffic-privacy">Saved only in this browser on this device, never in your GitHub files. For a public production app, use a backend proxy or provider-approved key restrictions. Traffic availability and freshness depend on TomTom.</p>
+      </section>
+    </div>
     <div class="modal-backdrop" id="overlay" aria-hidden="true">
       <section class="search-modal" role="dialog" aria-modal="true" aria-label="Search destinations">
         <div class="modal-header"><div class="modal-title">Search places</div><button class="close" id="closeSearch" aria-label="Close search">Done</button></div>

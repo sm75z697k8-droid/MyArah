@@ -251,7 +251,7 @@ $('locate').addEventListener('click', () => {
     {enableHighAccuracy: true, timeout: 15000, maximumAge: 10000});
   });
 });
-map.on('error',event=>{console.warn('Map rendering error',event.error);toast('Map tiles unavailable. Check your internet connection.')});
+map.on('error',event=>{console.warn('Map rendering error',event.error);if(event.sourceId==='myarah-traffic-source'){if(trafficOn){turnTrafficOff();toast('Traffic layer unavailable. Check Traffic settings.')}return;}toast('Map tiles unavailable. Check your internet connection.')});
 renderResults();
 setPlace(locations[0]);
 
@@ -437,3 +437,195 @@ window.addEventListener('orientationchange', refreshMyArahViewport);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) refreshMyArahViewport();
 });
+
+
+// === Optional live traffic overlay (TomTom Orbis v2 raster flow tiles). ===
+// The map's OpenFreeMap base, GPS indicator, 3D mode and bottom sheet are unchanged.
+// No synthetic traffic is shown. The user supplies a TomTom key on this device.
+const TRAFFIC_SOURCE = 'myarah-traffic-source';
+const TRAFFIC_LAYER = 'myarah-traffic-overlay';
+const TRAFFIC_REFRESH_MS = 120000;
+let trafficKey = '';
+let trafficOn = false;
+let trafficRefreshTimer = null;
+let trafficAbortController = null;
+let trafficBusy = false;
+let trafficPreviousFocus = null;
+try { trafficKey = localStorage.getItem('myarahTomTomTrafficKey') || ''; } catch (_) {}
+
+const trafficToggle = $('trafficToggle');
+const trafficLegend = $('trafficLegend');
+const trafficDialog = $('trafficDialog');
+const trafficKeyInput = $('trafficApiKey');
+const trafficMessage = $('trafficMessage');
+const trafficConnect = $('trafficConnect');
+
+function trafficTileUrl(key = trafficKey, night = dark) {
+  // TomTom Orbis Maps Traffic API, raster flow tile, v2, 256 px.
+  const style = night ? 'dark' : 'light';
+  return `https://api.tomtom.com/maps/orbis/traffic/flow/raster/tile/{z}/{x}/{y}?apiVersion=2&key=${encodeURIComponent(key)}&style=${style}&tileSize=256`;
+}
+
+function trafficCheckUrl(key) {
+  // Check a single tile near the *currently selected map center* before
+  // announcing that the overlay is live. The test also checks key validity.
+  const [lng, lat] = map.getCenter().toArray();
+  const z = 12;
+  const latRad = Math.max(-85, Math.min(85, lat)) * Math.PI / 180;
+  const x = Math.floor((lng + 180) / 360 * (2 ** z));
+  const y = Math.floor((1 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2 * (2 ** z));
+  return trafficTileUrl(key).replace('{z}', z).replace('{x}', Math.max(0, Math.min(2 ** z - 1, x))).replace('{y}', Math.max(0, Math.min(2 ** z - 1, y)));
+}
+
+function setTrafficMessage(message, isError = false) {
+  trafficMessage.textContent = message;
+  trafficMessage.classList.toggle('is-error', isError);
+}
+
+function setTrafficVisuals() {
+  trafficToggle.classList.toggle('is-active', trafficOn);
+  trafficToggle.setAttribute('aria-pressed', String(trafficOn));
+  trafficToggle.setAttribute('aria-label', trafficOn ? 'Turn off live traffic' : 'Turn on live traffic');
+  trafficLegend.hidden = !trafficOn;
+  $('trafficLiveLabel').textContent = 'Live traffic';
+}
+
+function installTrafficLayer() {
+  // MapLibre removes custom sources on light/dark style changes.
+  if (!trafficOn || !trafficKey) return;
+  if (!map.getSource(TRAFFIC_SOURCE)) {
+    map.addSource(TRAFFIC_SOURCE, {
+      type: 'raster',
+      tiles: [trafficTileUrl()],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 22,
+      attribution: 'Traffic © <a href="https://www.tomtom.com" target="_blank" rel="noopener noreferrer">TomTom</a>'
+    });
+  }
+  if (!map.getLayer(TRAFFIC_LAYER)) {
+    // Insert below labels so road names remain readable in both themes.
+    const labelLayer = map.getStyle().layers.find(layer => layer.type === 'symbol')?.id;
+    map.addLayer({
+      id: TRAFFIC_LAYER,
+      type: 'raster',
+      source: TRAFFIC_SOURCE,
+      paint: { 'raster-opacity': 0.91, 'raster-fade-duration': 230 }
+    }, labelLayer);
+  }
+}
+
+function refreshTraffic() {
+  if (!trafficOn || !trafficKey || document.hidden) return;
+  const source = map.getSource(TRAFFIC_SOURCE);
+  if (source?.setTiles) source.setTiles([trafficTileUrl()]);
+  else if (map.isStyleLoaded()) installTrafficLayer();
+  else map.once('idle', installTrafficLayer);
+}
+
+function turnTrafficOff() {
+  if (trafficAbortController) trafficAbortController.abort();
+  trafficAbortController = null;
+  if (trafficRefreshTimer) clearInterval(trafficRefreshTimer);
+  trafficRefreshTimer = null;
+  trafficOn = false;
+  trafficBusy = false;
+  trafficConnect.disabled = false;
+  trafficConnect.textContent = 'Connect traffic';
+  if (map.getLayer(TRAFFIC_LAYER)) map.removeLayer(TRAFFIC_LAYER);
+  if (map.getSource(TRAFFIC_SOURCE)) map.removeSource(TRAFFIC_SOURCE);
+  setTrafficVisuals();
+}
+
+async function turnTrafficOn(key) {
+  const clean = key.trim();
+  if (!clean) {
+    setTrafficMessage('Enter your TomTom API key first.', true);
+    return;
+  }
+  if (trafficBusy) return;
+  trafficBusy = true;
+  trafficConnect.disabled = true;
+  trafficConnect.textContent = 'Connecting…';
+  setTrafficMessage('Checking live traffic access…');
+  const controller = new AbortController();
+  trafficAbortController = controller;
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(trafficCheckUrl(clean), { signal: controller.signal, cache: 'no-store' });
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) throw new Error('Key rejected or Traffic API not enabled (HTTP ' + response.status + ').');
+      if (response.status === 429) throw new Error('Traffic API usage limit reached. Try again later.');
+      throw new Error('Traffic provider unavailable (HTTP ' + response.status + ').');
+    }
+    if (!(response.headers.get('content-type') || '').includes('image/')) throw new Error('The traffic provider did not return a map tile.');
+    if (controller.signal.aborted) return;
+    trafficKey = clean;
+    try { localStorage.setItem('myarahTomTomTrafficKey', clean); } catch (_) {}
+    trafficOn = true;
+    setTrafficVisuals();
+    if (map.isStyleLoaded()) installTrafficLayer();
+    else map.once('idle', installTrafficLayer);
+    if (trafficRefreshTimer) clearInterval(trafficRefreshTimer);
+    trafficRefreshTimer = setInterval(refreshTraffic, TRAFFIC_REFRESH_MS);
+    closeTrafficDialog();
+    toast('Live traffic is on · green / yellow / red roads');
+  } catch (error) {
+    if (!controller.signal.aborted || error.name === 'AbortError') {
+      if (trafficDialog.hidden) openTrafficDialog();
+      const message = error.name === 'AbortError' ? 'Traffic request timed out. Check your connection.' : error.message;
+      setTrafficMessage(message || 'Could not connect to TomTom traffic.', true);
+    }
+  } finally {
+    clearTimeout(timeout);
+    if (trafficAbortController === controller) trafficAbortController = null;
+    trafficBusy = false;
+    trafficConnect.disabled = false;
+    trafficConnect.textContent = 'Connect traffic';
+  }
+}
+
+function openTrafficDialog() {
+  trafficPreviousFocus = document.activeElement;
+  trafficKeyInput.value = trafficKey;
+  trafficKeyInput.type = 'password';
+  $('trafficKeyVisibility').textContent = 'Show';
+  setTrafficMessage(trafficOn ? 'Traffic is active. Add a different key to reconnect.' : 'Paste a TomTom Traffic API key to enable live road conditions.');
+  trafficDialog.hidden = false;
+  requestAnimationFrame(() => trafficKeyInput.focus());
+}
+function closeTrafficDialog() {
+  trafficDialog.hidden = true;
+  trafficPreviousFocus?.focus?.();
+}
+
+trafficToggle.addEventListener('click', () => {
+  if (trafficOn) { turnTrafficOff(); toast('Traffic layer off'); return; }
+  if (!trafficKey) { openTrafficDialog(); return; }
+  void turnTrafficOn(trafficKey);
+});
+$('trafficSettings').addEventListener('click', openTrafficDialog);
+$('trafficConfigure').addEventListener('click', openTrafficDialog);
+$('trafficClose').addEventListener('click', closeTrafficDialog);
+trafficDialog.addEventListener('click', event => { if (event.target === trafficDialog) closeTrafficDialog(); });
+$('trafficForm').addEventListener('submit', event => {
+  event.preventDefault();
+  if (trafficOn) turnTrafficOff();
+  void turnTrafficOn(trafficKeyInput.value);
+});
+$('trafficForget').addEventListener('click', () => {
+  turnTrafficOff();
+  trafficKey = '';
+  trafficKeyInput.value = '';
+  try { localStorage.removeItem('myarahTomTomTrafficKey'); } catch (_) {}
+  setTrafficMessage('Saved API key cleared.');
+});
+$('trafficKeyVisibility').addEventListener('click', () => {
+  const show = trafficKeyInput.type === 'password';
+  trafficKeyInput.type = show ? 'text' : 'password';
+  $('trafficKeyVisibility').textContent = show ? 'Hide' : 'Show';
+});
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && !trafficDialog.hidden) closeTrafficDialog(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshTraffic(); });
+map.on('style.load', () => { if (trafficOn) installTrafficLayer(); });
+setTrafficVisuals();
