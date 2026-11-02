@@ -649,29 +649,76 @@ sheetDragArea.addEventListener('click', event => {
 
 // Selecting a real search result or recent place collapses the sheet in setPlace().
 
+// Keep the sheet dimensions stable when the keyboard is appearing.
+// The search/traffic dialogs adjust independently to the visual viewport.
+function myarahTextFieldActive() {
+  const el = document.activeElement;
+  return !!el && (el.matches?.('input, textarea, [contenteditable="true"]') || el.isContentEditable);
+}
 window.addEventListener('resize', () => {
-  if (!sheetGesture) setSheetPosition(sheetPosition);
+  if (!sheetGesture && !myarahTextFieldActive()) setSheetPosition(sheetPosition);
 });
 // Start compact, preserving more visible map on iPhone.
 setSheetPosition('peek');
 
-
-// Keep the MapLibre canvas aligned when iOS changes the visible viewport
-// after launching from the Home Screen, rotating, or opening/closing Safari UI.
+// iOS Safari and Home Screen apps have separate layout and visual viewports.
+// Opening the keyboard shrinks/moves the visible area, but must NOT make
+// the map's full-screen container permanently shorter.
 let viewportResizeFrame = 0;
+let keyboardRecoveryTimers = [];
+function syncMyArahKeyboard() {
+  const vp = window.visualViewport;
+  const appHeight = appRoot.getBoundingClientRect().height;
+  const top = Math.max(0, vp?.offsetTop ?? 0);
+  const visibleHeight = Math.max(1, vp?.height ?? appHeight);
+  const coveredBottom = Math.max(0, appHeight - top - visibleHeight);
+  // Require focus AND substantial obstruction, to avoid treating an iOS
+  // toolbar/safe-area change as an on-screen keyboard.
+  const keyboardOpen = myarahTextFieldActive() && coveredBottom > 110;
+  appRoot.classList.toggle('keyboard-open', keyboardOpen);
+  appRoot.style.setProperty('--myarah-visual-top', keyboardOpen ? `${Math.round(top)}px` : '0px');
+  appRoot.style.setProperty('--myarah-keyboard-bottom', keyboardOpen ? `${Math.round(coveredBottom)}px` : '0px');
+  appRoot.style.setProperty('--myarah-visible-height', keyboardOpen ? `${Math.round(visibleHeight)}px` : `${Math.round(appHeight)}px`);
+  return keyboardOpen;
+}
 function refreshMyArahViewport() {
   if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame);
   viewportResizeFrame = requestAnimationFrame(() => {
     viewportResizeFrame = 0;
+    if (syncMyArahKeyboard()) return; // don't shrink the map to keyboard height
     map.resize();
-    if (!sheetGesture) setSheetPosition(sheetPosition);
+    if (!sheetGesture && !myarahTextFieldActive()) setSheetPosition(sheetPosition);
   });
 }
+function recoverMyArahAfterKeyboard() {
+  for (const timer of keyboardRecoveryTimers) clearTimeout(timer);
+  keyboardRecoveryTimers = [];
+  // WebKit may restore its offset over several frames after keyboard dismissal.
+  for (const delay of [0, 120, 350, 650]) {
+    keyboardRecoveryTimers.push(setTimeout(() => {
+      if (myarahTextFieldActive()) return;
+      // Scroll recovery is harmless if the root is already locked at zero.
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+      refreshMyArahViewport();
+    }, delay));
+  }
+}
 window.visualViewport?.addEventListener('resize', refreshMyArahViewport);
+window.visualViewport?.addEventListener('scroll', refreshMyArahViewport);
 window.addEventListener('orientationchange', refreshMyArahViewport);
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) refreshMyArahViewport();
+window.addEventListener('pageshow', recoverMyArahAfterKeyboard);
+document.addEventListener('focusin', event => {
+  if (event.target.matches?.('input, textarea, [contenteditable="true"]')) refreshMyArahViewport();
 });
+document.addEventListener('focusout', event => {
+  if (event.target.matches?.('input, textarea, [contenteditable="true"]')) recoverMyArahAfterKeyboard();
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) recoverMyArahAfterKeyboard();
+});
+refreshMyArahViewport();
 
 
 // === Optional live traffic overlay (TomTom Orbis v2 raster flow tiles). ===

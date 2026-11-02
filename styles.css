@@ -665,3 +665,32 @@ body.dark .map-controls .text-control {
 body.dark .map-controls .primary-control::after {
   background: radial-gradient(circle at 50% 30%, rgba(55,204,182,.23), rgba(55,204,182,.10) 55%, transparent 76%);
 }
+
+
+/* MyArah iPhone keyboard / fullscreen stabilization.
+   Keep the map at its existing full-height layout; only overlays adapt to
+   the *visual* viewport while iOS's keyboard covers the lower screen. */
+.app {
+  --myarah-visual-top: 0px;
+  --myarah-keyboard-bottom: 0px;
+  --myarah-visible-height: 100dvh;
+}
+.app.keyboard-open .modal-backdrop,
+.app.keyboard-open .traffic-dialog-backdrop {
+  top: var(--myarah-visual-top);
+  bottom: var(--myarah-keyboard-bottom);
+}
+.app.keyboard-open .search-modal,
+.app.keyboard-open .traffic-dialog {
+  max-height: calc(var(--myarah-visible-height) - 8px);
+}
+.app.keyboard-open .search-modal {
+  height: min(75dvh, calc(var(--myarah-visible-height) - 8px));
+  padding-bottom: 16px;
+}
+.app.keyboard-open .traffic-dialog {
+  padding-bottom: 16px;
+}
+/* Prevent iOS from scrolling the full page to make focused inputs visible.
+   The search/traffic dialogs keep their own scroll areas. */
+html, body { overscroll-behavior: none; }

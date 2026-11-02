@@ -211,3 +211,29 @@ This update only modifies the route comparison UI, the map route layers, and rel
 - Those controls use a **liquid-glass** treatment to better match the compass and the premium map UI.
 - The **location arrow** is slightly rotated and given a soft teal-blue glow, inspired by Apple-style walking/location controls.
 - The **traffic control** is intentionally left in its previous style for now, as requested.
+
+
+## Keyboard and full-screen viewport fix (iPhone)
+
+This small patch is based on the uploaded `MyArah-Icon-Align-GitHub.zip`.
+It does **not** change the map style, controls, traffic, routing, search logic,
+compass, or bottom-sheet design.
+
+- MyArah keeps the map's existing full-screen layout when the iOS keyboard appears.
+- While typing in Search or Traffic API key, their panels track the **visible**
+  space above the keyboard. The page itself does not shrink to the keyboard.
+- On keyboard dismissal, the page's scroll offset is reset and MapLibre is
+  resized once the screen settles; the bottom sheet retains its original state.
+- iOS WebKit sometimes retains a stale viewport offset after dismissing its
+  keyboard. This mitigates the problem, but system-owned Home Screen safe areas
+  and OS bugs cannot always be fixed by website code.
+- The original map and all features are preserved. Replace the four root files
+  on GitHub Pages; asset URL versions were changed to avoid stale cached files.
+
+### Test on iPhone
+1. Launch MyArah from Home Screen. Check that the map fills the screen.
+2. Search for a place; type with the keyboard open. The Search dialog should
+   fit into the visible area above the keyboard.
+3. Tap Done and dismiss the keyboard. The map and bottom sheet should return
+   to their full-screen positions.
+4. Repeat in Traffic settings, and try portrait/landscape if supported.
