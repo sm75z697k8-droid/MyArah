@@ -231,3 +231,48 @@ body.dark .topbar .theme-toggle .theme-sun { opacity: 1; transform: rotate(0deg)
 @media (prefers-reduced-motion: reduce) {
   .topbar .theme-toggle svg { transition: none; }
 }
+
+
+/* === Bottom blank-space fix (based on the uploaded MyArah project) ===
+   Older layout used 100dvh on .app while html/body still used 100%.
+   Some installed iPhone web apps report a shorter dynamic viewport.
+   Keep the entire app on one consistent viewport coordinate system. */
+html {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: #e5edf1;
+}
+body {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: #e5edf1;
+}
+.app {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+#map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+body.dark, body.dark .app, body.dark #map { background-color: #172431; }
+
+/* Installed iPhone apps should use the full layout viewport rather than
+   the sometimes-shorter dynamic viewport reported by WebKit. This only
+   affects Home Screen web apps, not a regular Safari browsing tab. */
+@media (display-mode: standalone) {
+  html, body, .app { height: 100vh; }
+  @supports (height: 100lvh) {
+    html, body, .app { height: 100lvh; }
+  }
+}

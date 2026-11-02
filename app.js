@@ -304,3 +304,21 @@ window.addEventListener('resize', () => {
 });
 // Start compact, preserving more visible map on iPhone.
 setSheetPosition('peek');
+
+
+// Keep the MapLibre canvas aligned when iOS changes the visible viewport
+// after launching from the Home Screen, rotating, or opening/closing Safari UI.
+let viewportResizeFrame = 0;
+function refreshMyArahViewport() {
+  if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame);
+  viewportResizeFrame = requestAnimationFrame(() => {
+    viewportResizeFrame = 0;
+    map.resize();
+    if (!sheetGesture) setSheetPosition(sheetPosition);
+  });
+}
+window.visualViewport?.addEventListener('resize', refreshMyArahViewport);
+window.addEventListener('orientationchange', refreshMyArahViewport);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshMyArahViewport();
+});

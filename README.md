@@ -50,3 +50,21 @@ Map engine: [MapLibre GL JS](https://maplibre.org/). Basemaps and 3D building ge
 - **Known iOS limitation:** WebKit bug 301994 describes an iOS 27 Home Screen web-app status-bar strip that can remain opaque even with `viewport-fit=cover` and `black-translucent`. If iOS keeps this region outside the webpage viewport, HTML/CSS cannot paint map tiles into it. See https://bugs.webkit.org/show_bug.cgi?id=301994.
 - GitHub Pages still works with these four files only. No build step is needed.
 
+
+## Bottom blank-space update
+
+- This update uses the original uploaded MyArah files; all screen elements, map
+  controls, styles, 2D/3D buildings, and bottom-sheet gestures remain in place.
+- Root elements and the map container now share the same viewport dimensions.
+  A Home Screen web app uses the large viewport (`100lvh` where supported),
+  while Safari still uses the responsive `100dvh` height.
+- A viewport resize hook resizes the WebGL map when iOS changes visible bounds.
+- When updating, replace `styles.css` and `app.js`. You can leave `index.html`
+  exactly as it was, but the ZIP includes the unchanged file for convenience.
+- **Important iOS limitation:** Some iOS 26/27 versions have a WebKit bug that
+  reserves an OS-owned strip below the actual webpage viewport in Home Screen
+  apps. That strip cannot be filled with interactive map tiles by CSS or JS;
+  the issue is reported at https://bugs.webkit.org/show_bug.cgi?id=301994
+  The changes above address page-layout gaps, not OS-owned letterboxing.
+- After publishing, reopen the Home Screen app fully. If the gap persists,
+  try opening the same GitHub Pages URL directly in Safari to compare.
