@@ -231,19 +231,20 @@ function renderRecentPlaces() {
 }
 function renderRecentSearch() {
   const node=$('results');node.replaceChildren();
-  $('resultsTitle').textContent='RECENT PLACES';
+  $('resultsTitle').textContent='RECENTS';
   if(!recentPlaces.length) {
     const empty=document.createElement('p');empty.className='empty';
     empty.textContent='No recent places. Try searching for a Malaysian address, shop, or postcode.';
     node.append(empty);
   } else recentPlaces.forEach(place=>appendResult(place,node,'recent'));
-  setSearchStatus('Type a place and tap Search.');
+  setSearchStatus('');
 }
 function openSearch() {
   const overlay=$('overlay');overlay.classList.add('open');overlay.setAttribute('aria-hidden','false');
   $('searchInput').value='';renderRecentSearch();
-  // Do not defer autofocus on iOS: it can scroll the whole viewport while
-  // the modal animates. Tap the input to start typing.
+  // Focus the dialog, not its input: iOS must not open the keyboard mid-animation.
+  // Tapping the field later uses the existing keyboard/fullscreen recovery code.
+  overlay.querySelector('.search-modal')?.focus({preventScroll:true});
 }
 function closeSearch() {
   $('overlay').classList.remove('open');$('overlay').setAttribute('aria-hidden','true');
@@ -316,7 +317,6 @@ async function submitSearch(event) {
     if(job===searchJob){$('searchSubmit').disabled=false;$('searchSubmit').textContent='Search';searchAbort=null;}
   }
 }
-$('openSearch').addEventListener('click',openSearch);
 $('browse').addEventListener('click',openSearch);
 $('closeSearch').addEventListener('click',closeSearch);
 $('overlay').addEventListener('click',event=>{if(event.target===$('overlay'))closeSearch()});
@@ -330,6 +330,33 @@ $('searchInput').addEventListener('input',()=>{
     setSearchStatus('Tap Search or press the keyboard Search key.');
   } else renderRecentSearch();
 });
+// Swipe down from the small search sheet grip to close smoothly.
+// Results keep their native scrolling; this gesture is grip-only.
+const searchGrabber = document.querySelector('.search-grabber');
+const searchPanel = document.querySelector('.search-modal');
+let searchSwipe = null;
+searchGrabber.addEventListener('pointerdown', event => {
+  if (!$('#overlay').classList.contains('open') || (event.pointerType==='mouse' && event.button!==0)) return;
+  searchSwipe={id:event.pointerId,startY:event.clientY,delta:0};
+  try {searchGrabber.setPointerCapture?.(event.pointerId);} catch (_) { /* mobile fallback */ }
+});
+searchGrabber.addEventListener('pointermove', event => {
+  if (!searchSwipe || searchSwipe.id!==event.pointerId) return;
+  searchSwipe.delta=Math.max(0,event.clientY-searchSwipe.startY);
+  if (searchSwipe.delta<7) return;
+  searchPanel.classList.add('is-search-dragging');
+  searchPanel.style.setProperty('--search-pull',`${searchSwipe.delta}px`);
+});
+function finishSearchSwipe(event, cancelled=false) {
+  if (!searchSwipe || searchSwipe.id!==event.pointerId) return;
+  const delta=searchSwipe.delta;
+  searchSwipe=null;
+  searchPanel.classList.remove('is-search-dragging');
+  searchPanel.style.removeProperty('--search-pull');
+  if (!cancelled && delta>105) closeSearch();
+}
+searchGrabber.addEventListener('pointerup',event=>finishSearchSwipe(event));
+searchGrabber.addEventListener('pointercancel',event=>finishSearchSwipe(event,true));
 $('recenter').addEventListener('click',()=>map.flyTo({
   center:chosen?chosen.coords:INITIAL_VIEW.center,
   ...cameraFor(chosen?chosen.zoom:INITIAL_VIEW.zoom),duration:motion()

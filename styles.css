@@ -838,3 +838,202 @@ body.dark #north .compass-tip {
   body.dark .map-controls .text-control,
   body.dark #north.compass-control { background: rgba(22,37,57,.97); border-color: #b2cadf; }
 }
+
+
+/* === MyArah search UX: single entry and fluid iPhone search sheet === */
+/* With only the theme control in the header, the map is the visual focus. */
+.topbar { justify-content: flex-end; pointer-events: none; }
+.topbar .theme-toggle { pointer-events: auto; }
+
+/* The bottom panel is the only search entry on the map. */
+.sheet .sheet-head { min-height: 36px; margin-bottom: 8px; }
+.sheet .sheet-head .eyebrow { display: none; }
+.sheet .sheet-head h1 { font-size: 20px; line-height: 1.18; margin: 0; letter-spacing: -.045em; }
+.sheet .sheet-head .brand { font-size: 15px; }
+.sheet .destination-button { min-height: 57px; padding: 8px 12px; gap: 10px; border-radius: 15px; }
+.sheet .dest-circle { width: 38px; height: 38px; border-radius: 12px; }
+.sheet .dest-circle svg { width: 20px; height: 20px; }
+.sheet .destination-button strong { font-size: 14px; }
+.sheet .destination-button small { font-size: 11px; }
+.sheet .chevron { font-size: 22px; }
+/* Recents live in the search sheet; not duplicated in the expanded map panel. */
+#recentSection { display: none !important; }
+
+/* Search sheet is always in the DOM for a reliable exit animation.
+   The panel animates on its own composited layer, not via height changes. */
+#overlay.modal-backdrop {
+  display: flex;
+  align-items: flex-end;
+  background: rgba(10,23,38,.18);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 320ms ease, visibility 0s linear 350ms;
+  -webkit-backdrop-filter: blur(0px);
+  backdrop-filter: blur(0px);
+  z-index: 15;
+}
+#overlay.modal-backdrop.open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  background: rgba(10,23,38,.26);
+  transition: opacity 320ms ease, visibility 0s;
+}
+#overlay .search-modal {
+  flex: 0 0 auto;
+  position: relative;
+  width: 100%;
+  height: min(91dvh, 900px);
+  max-height: calc(100% - env(safe-area-inset-top, 0px) - 10px);
+  margin: 0;
+  border-radius: 30px 30px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #f8f9fb;
+  color: #1c2835;
+  border: 1px solid rgba(255,255,255,.62);
+  border-bottom: 0;
+  box-shadow: 0 -15px 44px rgba(8,23,37,.20);
+  transform: translate3d(0,calc(100% + 16px),0);
+  opacity: .98;
+  animation: none !important;
+  transition: transform 480ms cubic-bezier(.22,1,.28,1),opacity 330ms ease;
+  will-change: transform;
+  -webkit-overflow-scrolling: touch;
+}
+#overlay.open .search-modal { transform: translate3d(0,0,0); opacity: 1; }
+#overlay .search-modal:focus { outline: none; }
+#overlay .search-grabber {
+  flex: 0 0 auto;
+  height: 5px; width: 40px;
+  border-radius: 12px;
+  margin: 11px auto 17px;
+  background: #c0c7d0;
+}
+#overlay .search-panel-bar {
+  display: flex; align-items: stretch; gap: 10px;
+  padding: 0 16px 12px;
+  flex: 0 0 auto;
+}
+#overlay .search-form {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 6px;
+  height: 50px; border-radius: 16px;
+  background: #e9ecf0;
+  border: 1px solid #d8dde3;
+  padding: 0 5px 0 11px;
+}
+#overlay .search-field {
+  flex: 1; min-width: 0; display: flex;
+  height: 46px; background: transparent; padding: 0;
+  border-radius: 12px;
+}
+#overlay .search-field svg { width: 21px; height: 21px; stroke: #576776; }
+#overlay .search-field input {
+  min-width: 0; font-size: 16px; font-weight: 530;
+  color: #203244;
+  outline: none;
+}
+#overlay .search-field input::placeholder { color: #718091; opacity: 1; }
+#overlay .search-submit {
+  flex: none; height: 37px; border: 0;
+  border-radius: 10px; padding: 0 11px;
+  background: #2879b8; color: #fff;
+  font-size: 13px; font-weight: 760;
+  touch-action: manipulation;
+}
+#overlay .search-submit:disabled { opacity: .60; }
+#overlay .close {
+  flex: none; display: grid; place-items: center;
+  height: 50px; width: 50px; border-radius: 50%;
+  color: #2e4055; background: #e5e8ec;
+  border: 1px solid #d9dfe6; padding: 0;
+  touch-action: manipulation;
+}
+#overlay .close svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2.5; stroke-linecap: round; }
+#overlay .search-panel-content {
+  min-height: 0; flex: 1;
+  padding: 6px 20px calc(env(safe-area-inset-bottom,0px) + 22px);
+  overflow-y: auto; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+#overlay .search-status { font-size: 13px; line-height: 1.5; margin: 6px 0 16px; color: #637386; }
+#overlay .search-status:empty { display: none; }
+#overlay .modal-label {
+  margin: 20px 2px 14px; font-size: 18px; font-weight: 770;
+  color: #26313d; letter-spacing: -.028em;
+}
+#overlay .results { background: #fff; border-radius: 20px; overflow: hidden; border: 1px solid #e6eaef; }
+#overlay .result { min-height: 67px; padding: 13px 15px; gap: 13px; border-bottom: 1px solid #edf0f3; }
+#overlay .result:last-child { border-bottom: 0; }
+#overlay .result-icon {
+  width: 38px; height: 38px; border-radius: 12px;
+  font-size: 23px; background: #eef3f8; color: #497caa;
+}
+#overlay .result-title { font-size: 15px; color: #273543; }
+#overlay .result-detail { font-size: 12px; color: #738293; }
+#overlay .result-arrow { color: #98a4af; }
+#overlay .empty { padding: 22px 16px; margin: 0; line-height: 1.55; }
+#overlay .modal-footnote { font-size: 11px; margin: 18px 2px 0; }
+#overlay a { color: #226aa2; }
+
+/* Retain strong contrast in the dark theme, including recents and input. */
+body.dark #overlay .search-modal {
+  background: #1c242f; color: #f1f5f9;
+  border-color: rgba(166,188,210,.18);
+  box-shadow: 0 -16px 48px rgba(0,0,0,.46);
+}
+body.dark #overlay .search-grabber { background: #657180; }
+body.dark #overlay .search-form { background: #333d49; border-color: #495565; }
+body.dark #overlay .search-field input { color: #f4f7fb; }
+body.dark #overlay .search-field input::placeholder { color: #b2bfcc; }
+body.dark #overlay .search-field svg { stroke: #c0cbd6; }
+body.dark #overlay .search-submit { background: #5398dc; color: #081825; }
+body.dark #overlay .close { color: #f5f7fa; background: #3b4654; border-color: #566171; }
+body.dark #overlay .modal-label { color: #f0f4f8; }
+body.dark #overlay .results { background: #29333f; border-color: #3f4c5b; }
+body.dark #overlay .result { border-bottom-color: #3d4956; }
+body.dark #overlay .result-icon { background: #354658; color: #a6d6ff; }
+body.dark #overlay .result-title { color: #f0f4f9; }
+body.dark #overlay .result-detail { color: #bac6d1; }
+body.dark #overlay .result-arrow { color: #a9b8c6; }
+body.dark #overlay .search-status { color: #bfcbd5; }
+body.dark #overlay .empty { color: #bfcbd5; }
+body.dark #overlay .modal-footnote { color: #aebdc9; }
+body.dark #overlay a { color: #92c9fc; }
+
+/* iPhone keyboard viewport: keep the search header visible above the keys. */
+.app.keyboard-open #overlay .search-modal {
+  height: min(91dvh, calc(var(--myarah-visible-height) - 8px));
+  max-height: calc(var(--myarah-visible-height) - 8px);
+  padding: 0;
+}
+@media (min-width: 700px) {
+  #overlay.modal-backdrop { align-items: center; justify-content: center; }
+  #overlay .search-modal { width: min(520px, calc(100vw - 36px)); height: min(760px, 90dvh); border-radius: 26px; border-bottom: 1px solid rgba(255,255,255,.48); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #overlay.modal-backdrop, #overlay .search-modal { transition: none; }
+}
+
+/* Drag-dismiss and gentle content reveal. */
+#overlay .search-grabber { touch-action: none; cursor: grab; }
+#overlay.open .search-modal.is-search-dragging {
+  transform: translate3d(0, var(--search-pull, 0px), 0);
+  transition: none;
+}
+#overlay .search-panel-bar,
+#overlay .search-panel-content {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 300ms ease, transform 380ms cubic-bezier(.22,1,.28,1);
+}
+#overlay.open .search-panel-bar,
+#overlay.open .search-panel-content { opacity: 1; transform: translateY(0); }
+#overlay.open .search-panel-content { transition-delay: 70ms; }
+@media (prefers-reduced-motion: reduce) {
+  #overlay .search-panel-bar, #overlay .search-panel-content { transition: none; }
+}

@@ -255,3 +255,14 @@ compass, or bottom-sheet design.
 - Traffic button remains intentionally unchanged.
 - Supports iOS **Increase Contrast** (`prefers-contrast: more`), where supported.
 - Only `styles.css`, `index.html` (stylesheet cache version), and this README were changed. `app.js` is identical to the uploaded version.
+
+
+## Search experience update (map-first)
+- Removed the **top search** button; the bottom sheet's **Search Malaysia** control is the single map-screen entry. The existing theme button stays at top-right.
+- The search panel slides up with a smooth transform animation, shows **Recents** immediately, and contains **no Find Nearby categories**. Search results appear in the same panel after submitting an explicit query.
+- The bottom sheet still supports swipes, traffic settings and route comparisons. Route search, TomTom flow data, maps, GPS, and compass internals are unchanged.
+- The search field is not automatically focused: on iPhone, tap it to open the keyboard after the panel settles. This preserves keyboard viewport recovery.
+- Light/dark search panels use contrasting text and accessible buttons. `prefers-reduced-motion` is respected.
+- The free public Nominatim service is not used for autocomplete; press Search to send a query. Use a production geocoding provider before large-scale release.
+
+- The search sheet grip supports **swipe down to dismiss**; scrolling search results remains independent.
