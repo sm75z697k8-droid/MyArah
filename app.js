@@ -124,17 +124,132 @@ $('tilt').addEventListener('click',()=>{
   toast(tilted?'3D mode · buildings where available':'2D map');
 });
 $('north').addEventListener('click',()=>map.easeTo({bearing:0,duration:reducedMotion?0:520,easing:cameraEase}));
-$('locate').addEventListener('click',()=>{
-  if(!navigator.geolocation){toast('Location is not available');return}
+// iPhone-style facing-direction cone. This uses a real compass reading when
+// allowed, not a randomly rotating graphic or an assumed travel direction.
+// The direction is screen-relative, so map rotation is deducted from heading.
+let compassHeading = null;
+let compassListening = false;
+let locationCone = null;
+let displayedConeRotation = null;
+let lastHeadingUpdate = 0;
+
+const normalizedHeading = angle => (angle % 360 + 360) % 360;
+const smallestAngle = angle => ((angle + 540) % 360) - 180;
+
+function drawFacingDirection() {
+  if (!locationCone) return;
+  const available = Number.isFinite(compassHeading);
+  locationCone.parentElement.classList.toggle('has-heading', available);
+  if (!available) return;
+
+  const target = normalizedHeading(compassHeading - map.getBearing());
+  // Unwrap degrees so going from 359 to 0 does NOT spin backwards 359°.
+  displayedConeRotation = displayedConeRotation === null ? target :
+    displayedConeRotation + smallestAngle(target - displayedConeRotation);
+  locationCone.style.transform = `rotate(${displayedConeRotation}deg)`;
+}
+
+function handleCompassOrientation(event) {
+  let value = null;
+  // iOS Safari: a real-world north reference, unlike relative alpha angles.
+  if (typeof event.webkitCompassHeading === 'number' &&
+      Number.isFinite(event.webkitCompassHeading) && event.webkitCompassHeading >= 0) {
+    const accuracy = event.webkitCompassAccuracy;
+    if (typeof accuracy === 'number' && (accuracy < 0 || accuracy > 75)) return;
+    value = event.webkitCompassHeading;
+  } else if (event.absolute === true && typeof event.alpha === 'number' &&
+             Number.isFinite(event.alpha)) {
+    // On devices exposing absolute alpha, account for rotated screens.
+    const screenAngle = window.screen?.orientation?.angle ?? window.orientation ?? 0;
+    value = 360 - event.alpha + screenAngle;
+  }
+  if (value === null) return;
+  const now = performance.now();
+  if (now - lastHeadingUpdate < 45) return; // avoid redundant sensor redraws
+  lastHeadingUpdate = now;
+
+  const incoming = normalizedHeading(value);
+  // A small low-pass filter removes compass jitter, including near 0/360°.
+  compassHeading = compassHeading === null ? incoming :
+    normalizedHeading(compassHeading + smallestAngle(incoming - compassHeading) * 0.28);
+  drawFacingDirection();
+}
+
+function enableFacingDirection() {
+  if (compassListening) return Promise.resolve(true);
+  if (!window.DeviceOrientationEvent) return Promise.resolve(false);
+
+  function listen() {
+    if (compassListening) return true;
+    window.addEventListener('deviceorientation', handleCompassOrientation);
+    window.addEventListener('deviceorientationabsolute', handleCompassOrientation);
+    compassListening = true;
+    return true;
+  }
+
+  // iPhone permission must be requested DIRECTLY from the location button tap.
+  if (typeof window.DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      return Promise.resolve(window.DeviceOrientationEvent.requestPermission(true))
+        .then(result => result === 'granted' ? listen() : false)
+        .catch(() => false);
+    } catch (_) {
+      return Promise.resolve(false);
+    }
+  }
+  return Promise.resolve(listen());
+}
+
+function showUserLocation(coords) {
+  if (!userMarker) {
+    const indicator = document.createElement('div');
+    indicator.className = 'myarah-location-indicator';
+    indicator.setAttribute('aria-label', 'Your location');
+    indicator.innerHTML = `
+      <svg class="myarah-heading-cone" viewBox="0 0 168 168" aria-hidden="true">
+        <defs>
+          <linearGradient id="myarah-heading-fill" x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0%" stop-color="#368BFA" stop-opacity=".64"/>
+            <stop offset="55%" stop-color="#368BFA" stop-opacity=".31"/>
+            <stop offset="100%" stop-color="#368BFA" stop-opacity=".035"/>
+          </linearGradient>
+        </defs>
+        <path d="M84 84 L39 15 A82 82 0 0 1 129 15 Z" fill="url(#myarah-heading-fill)"/>
+      </svg>
+      <span class="location-marker" aria-hidden="true"></span>`;
+    locationCone = indicator.querySelector('.myarah-heading-cone');
+    userMarker = new maplibregl.Marker({
+      element: indicator,
+      anchor: 'center',
+      rotationAlignment: 'viewport',
+      pitchAlignment: 'viewport',
+      subpixelPositioning: true
+    }).setLngLat(coords).addTo(map);
+  } else {
+    userMarker.setLngLat(coords);
+  }
+  drawFacingDirection();
+}
+
+map.on('rotate', drawFacingDirection);
+
+$('locate').addEventListener('click', () => {
+  if (!navigator.geolocation) { toast('Location is not available'); return; }
   toast('Finding your location…');
-  navigator.geolocation.getCurrentPosition(position=>{
-    const coords=[position.coords.longitude,position.coords.latitude];
-    if(userMarker)userMarker.remove();
-    const dot=document.createElement('div');dot.className='location-marker';
-    userMarker=new maplibregl.Marker({element:dot}).setLngLat(coords).addTo(map);
-    map.flyTo({center:coords,...cameraFor(15),duration:motion()});
-    toast('Your location is on the map');
-  },error=>toast(error.code===1?'Location permission denied':'Location unavailable. Check your GPS.'),{enableHighAccuracy:true,timeout:15000,maximumAge:10000});
+  // Ask for compass permission before GPS, avoiding two iOS permission
+  // dialogs appearing over each other. GPS still works if compass is denied.
+  enableFacingDirection().then(() => {
+    navigator.geolocation.getCurrentPosition(position => {
+      const coords = [position.coords.longitude, position.coords.latitude];
+      showUserLocation(coords);
+      map.flyTo({center: coords, ...cameraFor(15), duration: motion()});
+      toast(Number.isFinite(compassHeading)
+        ? 'Your location and facing direction are on the map'
+        : 'Location found · Direction appears if compass is available');
+    }, error => toast(error.code === 1 ? 'Location permission denied'
+      : 'Location unavailable. Check your GPS.'),
+    {enableHighAccuracy: true, timeout: 15000, maximumAge: 10000});
+  });
 });
 map.on('error',event=>{console.warn('Map rendering error',event.error);toast('Map tiles unavailable. Check your internet connection.')});
 renderResults();

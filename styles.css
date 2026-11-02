@@ -276,3 +276,38 @@ body.dark, body.dark .app, body.dark #map { background-color: #172431; }
     html, body, .app { height: 100lvh; }
   }
 }
+
+
+/* Direction cone: a screen-aligned overlay around the existing GPS dot.
+   Hidden unless the device provides a real compass/absolute heading. */
+.myarah-location-indicator {
+  width: 168px;
+  height: 168px;
+  position: relative;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.myarah-heading-cone {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transform-origin: 50% 50%;
+  transition: transform 300ms ease-out, opacity 250ms ease;
+  pointer-events: none;
+  filter: drop-shadow(0 0 5px rgba(45,130,255,.10));
+}
+.myarah-location-indicator.has-heading .myarah-heading-cone { opacity: 1; }
+.myarah-location-indicator .location-marker {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .myarah-heading-cone { transition: none; }
+}
