@@ -1,18 +1,62 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-<meta name="theme-color" content="#06101f"/><title>MyArah — Map UI Prototype</title>
-<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css"/>
-<link rel="stylesheet" href="styles.css"/>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#151c20">
+  <meta name="description" content="MyArah — explore Malaysia with a calm, map-first experience.">
+  <title>MyArah — Explore Malaysia</title>
+  <link rel="preconnect" href="https://basemaps.cartocdn.com" crossorigin>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div id="map" aria-label="Interactive map of Malaysia"></div>
-<div class="ui"><div class="top"><div class="brand-row"><div class="brand">My<span>Arah</span><span style="font-size:9px;letter-spacing:2px;vertical-align:top;margin-left:8px;color:#a0bdce">BETA</span></div><div class="pill">🇲🇾 MALAYSIA</div></div><button class="search" id="open-search"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/></svg><span>Where to, <span class="muted">hari ini?</span></span></button></div>
-<div class="status" id="status">Explore Malaysia • UI prototype</div>
-<div class="side"><button class="circle" id="locate" aria-label="Find my location" title="Find my location">⌖</button><button class="circle active" id="tilt" aria-label="Toggle tilted view" title="Toggle tilted view">3D</button><button class="circle" id="north" aria-label="Reset map bearing" title="Reset bearing">↟</button></div>
-<div class="bottom" id="bottom"><div class="handle"></div><div class="eyebrow" id="small-title">DISCOVER YOUR WAY</div><div class="title" id="main-title">Explore Malaysia <span style="color:#42ddff">↗</span></div><div class="description" id="subtitle">A new way to move. Made for Malaysian journeys.</div><div class="chips" id="chips"><button class="chip selected" data-place="kl">Kuala Lumpur</button><button class="chip" data-place="penang">Penang</button><button class="chip" data-place="jb">Johor Bahru</button><button class="chip" data-place="kk">Kota Kinabalu</button><button class="chip" data-place="kuching">Kuching</button></div><button class="primary" id="action">Explore destinations <span>→</span></button><div class="tiny" style="text-align:center">Map preview only • Not live turn-by-turn navigation</div></div>
-<div class="sheet" id="sheet"><div class="panel"><div class="panel-header"><h2>Choose a destination</h2><button class="close" id="close-search" aria-label="Close">×</button></div><input class="input" id="destination" placeholder="Search city in Malaysia" autocomplete="off"/><div class="places" id="places"></div><div class="tiny">Select one of the sample cities to move the map. Address search and road routing are planned for a later version.</div></div></div></div>
-<script type="module" src="app.js"></script>
+  <main class="app">
+    <div id="map" role="application" aria-label="Interactive Malaysia map"></div>
+    <div class="map-shade" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="brand"><span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M7 24 15 6l10 20-10-5-8 3Z" fill="currentColor"/></svg></span><span>my<span class="brand-bold">arah</span></span></div>
+      <button class="avatar-button" id="theme" aria-label="Toggle map appearance" title="Toggle light and dark map"><svg viewBox="0 0 24 24"><path d="M20 15.8A8 8 0 0 1 8.2 4a8 8 0 1 0 11.8 11.8Z"/></svg></button>
+    </header>
+
+    <div class="search-wrap">
+      <button id="openSearch" class="searchbar"><svg class="search-icon" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></svg><span>Where are we going?</span><span class="search-shortcut">Search</span></button>
+    </div>
+
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+    <div class="controls">
+      <button class="map-control" id="locate" title="Find my location" aria-label="Find my location"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><circle cx="12" cy="12" r="8"/><path d="M12 1v3m0 16v3M1 12h3m16 0h3"/></svg></button>
+      <button class="map-control" id="tilt" aria-label="Toggle map tilt" title="Toggle map tilt"><span id="tiltText">2D</span></button>
+      <button class="map-control" id="north" title="Reset north" aria-label="Reset north"><svg viewBox="0 0 24 24"><path d="m12 3 6 17-6-4-6 4 6-17Z"/></svg></button>
+    </div>
+
+    <section class="bottom-card" aria-label="Explore places">
+      <div class="drag-handle" aria-hidden="true"></div>
+      <div class="card-kicker"><span class="kicker-dot"></span> DISCOVER MALAYSIA</div>
+      <h1 id="placeTitle">Good evening.</h1>
+      <p id="placeSubtitle">Where would you like to explore today?</p>
+      <div class="place-strip" aria-label="Popular places">
+        <button class="place-chip" data-place="kl">Kuala Lumpur</button>
+        <button class="place-chip" data-place="penang">Penang</button>
+        <button class="place-chip" data-place="jb">Johor Bahru</button>
+        <button class="place-chip" data-place="kk">Kota Kinabalu</button>
+        <button class="place-chip" data-place="kuching">Kuching</button>
+      </div>
+      <div class="card-foot"><span><svg viewBox="0 0 24 24"><path d="m4 19 6-14 4 7 6-3-5 11-5-7-6 6Z"/></svg> Map exploration</span><button id="browse" class="browse-button">Browse places <span aria-hidden="true">→</span></button></div>
+    </section>
+
+    <div class="overlay" id="overlay" aria-hidden="true">
+      <section class="search-sheet" role="dialog" aria-modal="true" aria-labelledby="searchHeading">
+        <div class="sheet-top"><h2 id="searchHeading">Search places</h2><button id="closeSearch" class="close" aria-label="Close search">×</button></div>
+        <div class="input-wrap"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></svg><input id="searchInput" type="search" autocomplete="off" placeholder="City or state in Malaysia" aria-label="Search sample cities"></div>
+        <div class="section-label">SUGGESTED PLACES</div>
+        <div id="results" class="results"></div>
+        <p class="search-disclaimer">This prototype searches five sample cities only. Road directions and live traffic are not enabled yet.</p>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
