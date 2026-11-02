@@ -1,4 +1,4 @@
-import maplibregl from 'https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs';
+import * as maplibregl from 'https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs';
 
 // The five destinations are deliberately sample data, not live address search.
 const locations = [
@@ -10,12 +10,10 @@ const locations = [
 ];
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const tiles = theme => ({
-  version:8,
-  sources:{basemap:{type:'raster',tiles:[`https://basemaps.cartocdn.com/${theme}/{z}/{x}/{y}@2x.png`],tileSize:256,attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors · © <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>'}},
-  layers:[{id:'map-tiles',source:'basemap',type:'raster'}]
-});
-const map = new maplibregl.Map({container:'map',style:tiles('voyager'),center:locations[0].coords,zoom:12,pitch:0,bearing:0,attributionControl:true,canvasContextAttributes:{antialias:true}});
+// CARTO now requires a key; use OpenFreeMap styles without an API key.
+// Light and dark use the same map engine and preserve the existing UI.
+const mapStyle = isDark => `https://tiles.openfreemap.org/styles/${isDark ? 'dark' : 'positron'}`;
+const map = new maplibregl.Map({container:'map',style:mapStyle(false),center:locations[0].coords,zoom:12,pitch:0,bearing:0,attributionControl:true,canvasContextAttributes:{antialias:true}});
 let dark=false,tilted=false,chosen=locations[0],selectedMarker=null,userMarker=null,toastTimer;
 
 // v4 map-only enhancement: the original CARTO map remains the basemap.
@@ -98,7 +96,7 @@ document.querySelectorAll('[data-place]').forEach(button=>button.addEventListene
 $('recenter').addEventListener('click',()=>map.flyTo({center:chosen.coords,...cameraFor(chosen.zoom),duration:motion()}));
 $('theme').addEventListener('click',()=>{
   dark=!dark;document.body.classList.toggle('dark',dark);
-  map.setStyle(tiles(dark?'dark_all':'voyager'));
+  map.setStyle(mapStyle(dark));
   $('theme').setAttribute('aria-label',dark?'Switch to light map':'Switch to dark map');
   toast(dark?'Dark appearance':'Light appearance');
 });
