@@ -4,10 +4,13 @@ A minimal, premium, iPhone-first map prototype with an interactive map. Inspired
 
 ## Included
 - Responsive map-first UI and iPhone safe-area support
-- **NEW:** compact-by-default bottom sheet with swipe-up/down positions, tappable grab handle, and vertically scrollable expanded content
+- Compact-by-default bottom sheet with swipe-up/down positions, tappable grab handle, and vertically scrollable expanded content
+- **NEW:** smoother bottom-sheet settling with frame-batched touch dragging, quick-flick behavior, and softer transitions
+- **NEW:** distinctive circular compass rose icon (separate from the GPS location arrow)
+- Gentler 2D/3D and north-reset camera movements, respecting Reduce Motion
 - Pan/zoom, five sample Malaysian city destinations, and animated map camera
 - Location button (needs browser permission and HTTPS)
-- Original light and dark CARTO basemaps, north reset, plus 2D and 3D map modes with *real building extrusions where OpenStreetMap geometry exists*
+- Light and dark OpenFreeMap basemaps, north reset, plus 2D and 3D map modes with *real building extrusions where OpenStreetMap geometry exists*
 - Accessible search dialog, reduced-motion preferences, and proper map attribution
 
 ## Publish on GitHub Pages from an iPhone
@@ -16,7 +19,7 @@ A minimal, premium, iPhone-first map prototype with an interactive map. Inspired
 3. Go to Settings → Pages → Deploy from a branch → `main` → `/ (root)` → Save.
 4. Open the GitHub Pages URL in Safari. To install the shortcut, choose Share → Add to Home Screen.
 
-No build step, package manager, server, or API key is required for this demo. Internet access is needed for MapLibre, the original CARTO raster map, and (in 3D) OpenFreeMap building vector data. Switching light/dark rebuilds the 3D overlay automatically.
+No build step, package manager, server, or API key is required for this demo. Internet access is needed for MapLibre, OpenFreeMap map tiles and 3D building vector data. Switching light/dark rebuilds the 3D overlay automatically.
 
 ## Using the bottom panel
 - At launch, the sheet takes up only enough space for **Where to?** and **Find a destination**.
@@ -24,7 +27,7 @@ No build step, package manager, server, or API key is required for this demo. In
 - Tap the small handle to cycle through **compact → medium → expanded → compact**.
 - Once expanded, scroll **inside** the panel vertically; the map behind it remains pannable outside the panel.
 - City selection collapses the sheet to show the map again.
-- These changes affect only the bottom panel and its associated controls; the existing OpenFreeMap map, 2D/3D toggle, GPS and dark mode are preserved.
+- This polish preserves the existing OpenFreeMap map, 2D/3D toggle, GPS, dark mode, search, bottom panel design, and original project structure.
 
 ## Limitations
 - Search uses only the five sample cities; not a live Malaysian addresses database.
@@ -34,4 +37,4 @@ No build step, package manager, server, or API key is required for this demo. In
 - Public tile/demo hosting has usage terms and limits. For a production navigation service, select a properly licensed map tile provider and routing/geocoding APIs.
 
 ## Credits
-Map engine: [MapLibre GL JS](https://maplibre.org/). Raster imagery: [CARTO basemaps](https://carto.com/basemaps/). 3D building geometry: [OpenFreeMap](https://openfreemap.org/), based on [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Attribution appears on the map.
+Map engine: [MapLibre GL JS](https://maplibre.org/). Basemaps and 3D building geometry: [OpenFreeMap](https://openfreemap.org/), based on [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Attribution appears on the map.

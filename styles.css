@@ -13,8 +13,7 @@ body.dark #tilt.is-active{background:#29445b;border-color:#5a89af;color:#b5dffd}
   flex-direction: column;
   padding: 0;
   overflow: hidden;
-  transition: height 290ms cubic-bezier(.22,.8,.22,1);
-  will-change: height;
+  transition: height 430ms cubic-bezier(.2,.88,.22,1);
 }
 .sheet-drag-area {
   flex: 0 0 auto;
@@ -62,7 +61,7 @@ body.dark #tilt.is-active{background:#29445b;border-color:#5a89af;color:#b5dffd}
 }
 .map-controls {
   bottom: calc(env(safe-area-inset-bottom) + var(--sheet-height) + 27px);
-  transition: bottom 290ms cubic-bezier(.22,.8,.22,1), opacity 180ms ease;
+  transition: bottom 430ms cubic-bezier(.2,.88,.22,1), opacity 220ms ease;
 }
 /* The full panel takes focus; keep map controls from appearing over it. */
 @media (max-width:699px) {
@@ -76,4 +75,29 @@ body.dark #tilt.is-active{background:#29445b;border-color:#5a89af;color:#b5dffd}
 }
 @media (prefers-reduced-motion:reduce) {
   .sheet, .map-controls { transition: none; }
+}
+
+/* Smooth interaction polish: no UI redesign. */
+.sheet.is-dragging, .app.sheet-dragging .map-controls { transition: none; }
+.sheet .handle { transition: width 250ms ease, background-color 250ms ease; }
+.sheet-drag-area:active .handle { width: 44px; }
+.control, .search-trigger, .avatar, .destination-button, .sheet-grabber {
+  transition: transform 180ms cubic-bezier(.2,.8,.2,1);
+}
+.control:active, .avatar:active, .search-trigger:active, .destination-button:active {
+  transform: scale(.97);
+}
+/* Distinct classic compass rose; the location arrow stays unchanged. */
+#north .compass-icon { width: 25px; height: 25px; }
+#north .compass-north { fill: #d65c59; stroke: none; }
+#north .compass-south { fill: currentColor; stroke: none; opacity: .65; }
+/* Slightly gentler opening of the existing destination search modal. */
+.search-modal { animation: myarahModalIn 330ms cubic-bezier(.2,.88,.22,1) both; }
+@keyframes myarahModalIn {
+  from { transform: translate3d(0,22px,0); opacity: .72; }
+  to { transform: translate3d(0,0,0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .search-modal { animation: none; }
+  .control, .search-trigger, .avatar, .destination-button, .sheet-grabber, .sheet .handle { transition: none; }
 }

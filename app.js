@@ -16,7 +16,7 @@ const mapStyle = isDark => `https://tiles.openfreemap.org/styles/${isDark ? 'dar
 const map = new maplibregl.Map({container:'map',style:mapStyle(false),center:locations[0].coords,zoom:12,pitch:0,bearing:0,attributionControl:true,canvasContextAttributes:{antialias:true}});
 let dark=false,tilted=false,chosen=locations[0],selectedMarker=null,userMarker=null,toastTimer;
 
-// v4 map-only enhancement: the original CARTO map remains the basemap.
+// v4 map-only enhancement: keep the existing OpenFreeMap basemap.
 // An optional OpenFreeMap vector layer supplies real building geometry in 3D.
 const BUILDING_ZOOM = 15.7;
 const THREE_D_PITCH = 56;
@@ -59,7 +59,9 @@ function add3DBuildings() {
 }
 map.on('style.load', add3DBuildings);
 function toast(message){const el=$('notice');el.textContent=message;el.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.hidden=true,3500)}
-function motion(){return reducedMotion?0:850}
+// Gentle ease-out for small camera changes; honor iOS Reduce Motion.
+const cameraEase = t => 1 - Math.pow(1 - t, 3);
+function motion(){return reducedMotion?0:1000}
 function setPlace(place){
   chosen=place;
   map.flyTo({center:place.coords,...cameraFor(place.zoom),duration:motion(),essential:true});
@@ -110,7 +112,8 @@ $('tilt').addEventListener('click',()=>{
     pitch: tilted ? THREE_D_PITCH : 0,
     bearing: tilted ? THREE_D_BEARING : 0,
     zoom: tilted ? Math.max(map.getZoom(), BUILDING_ZOOM) : map.getZoom(),
-    duration: reducedMotion ? 0 : 650
+    duration: reducedMotion ? 0 : 760,
+    easing: cameraEase
   });
   $('tilt').textContent=tilted?'2D':'3D';
   $('tilt').classList.toggle('is-active',tilted);
@@ -118,7 +121,7 @@ $('tilt').addEventListener('click',()=>{
   $('tilt').setAttribute('aria-label',tilted?'Switch to 2D map':'Switch to 3D map');
   toast(tilted?'3D mode · buildings where available':'2D map');
 });
-$('north').addEventListener('click',()=>map.easeTo({bearing:0,duration:reducedMotion?0:350}));
+$('north').addEventListener('click',()=>map.easeTo({bearing:0,duration:reducedMotion?0:520,easing:cameraEase}));
 $('locate').addEventListener('click',()=>{
   if(!navigator.geolocation){toast('Location is not available');return}
   toast('Finding your location…');
@@ -147,6 +150,24 @@ const sheetPositions = ['peek', 'half', 'full'];
 let sheetPosition = 'peek';
 let sheetGesture = null;
 let suppressSheetClick = false;
+let dragFrame = 0;
+let queuedDragHeight = null;
+
+function queueDragHeight(height) {
+  queuedDragHeight = height;
+  if (dragFrame) return;
+  dragFrame = requestAnimationFrame(() => {
+    dragFrame = 0;
+    setSheetHeight(queuedDragHeight);
+  });
+}
+
+function flushDragHeight(height) {
+  if (dragFrame) cancelAnimationFrame(dragFrame);
+  dragFrame = 0;
+  queuedDragHeight = null;
+  setSheetHeight(height);
+}
 
 function sheetHeights() {
   const viewport = appRoot.getBoundingClientRect().height;
@@ -183,46 +204,75 @@ function closestSheetPosition(height) {
 
 sheetDragArea.addEventListener('pointerdown', event => {
   if (event.pointerType === 'mouse' && event.button !== 0) return;
+  if (sheetGesture) return;
+  const heights = sheetHeights(); // Read layout once, not on every move.
   sheetGesture = {
     id: event.pointerId,
     y: event.clientY,
-    startingHeight: sheetHeights()[sheetPosition],
+    lastY: event.clientY,
+    lastTime: event.timeStamp,
+    velocity: 0,
+    startingHeight: heights[sheetPosition],
+    minHeight: heights.peek,
+    maxHeight: heights.full,
     originalPosition: sheetPosition,
     delta: 0,
     moved: false
   };
+  if (sheetDragArea.setPointerCapture) {
+    try { sheetDragArea.setPointerCapture(event.pointerId); } catch (_) { /* iOS fallback */ }
+  }
 });
 
 window.addEventListener('pointermove', event => {
-  if (!sheetGesture || sheetGesture.id !== event.pointerId) return;
-  sheetGesture.delta = sheetGesture.y - event.clientY;
-  if (!sheetGesture.moved && Math.abs(sheetGesture.delta) < 7) return;
-  sheetGesture.moved = true;
-  sheet.style.transition = 'none';
-  const {peek, full} = sheetHeights();
-  setSheetHeight(Math.max(peek, Math.min(full, sheetGesture.startingHeight + sheetGesture.delta)));
+  const gesture = sheetGesture;
+  if (!gesture || gesture.id !== event.pointerId) return;
+  gesture.delta = gesture.y - event.clientY;
+  if (!gesture.moved && Math.abs(gesture.delta) < 7) return;
+  const dt = Math.max(1, event.timeStamp - gesture.lastTime);
+  const speed = (gesture.lastY - event.clientY) / dt; // positive = swipe up
+  gesture.velocity = gesture.moved ? gesture.velocity * .45 + speed * .55 : speed;
+  gesture.lastY = event.clientY;
+  gesture.lastTime = event.timeStamp;
+  if (!gesture.moved) {
+    gesture.moved = true;
+    sheet.classList.add('is-dragging');
+    appRoot.classList.add('sheet-dragging');
+  }
+  const nextHeight = Math.max(gesture.minHeight, Math.min(gesture.maxHeight, gesture.startingHeight + gesture.delta));
+  queueDragHeight(nextHeight);
 });
 
 function endSheetGesture(event, cancelled = false) {
   if (!sheetGesture || sheetGesture.id !== event.pointerId) return;
   const gesture = sheetGesture;
   sheetGesture = null;
-  if (!gesture.moved || cancelled) {
-    if (cancelled) setSheetPosition(gesture.originalPosition);
-    return;
+  if (!gesture.moved) return;
+  // Flush the last drag frame before starting the snap transition.
+  const endingHeight = Math.max(gesture.minHeight, Math.min(gesture.maxHeight, gesture.startingHeight + gesture.delta));
+  flushDragHeight(endingHeight);
+  // Apply the drag position while transitions are disabled, then re-enable for snapping.
+  void sheet.offsetHeight;
+  sheet.classList.remove('is-dragging');
+  appRoot.classList.remove('sheet-dragging');
+  if (!cancelled) {
+    suppressSheetClick = true;
+    window.setTimeout(() => { suppressSheetClick = false; }, 220);
   }
-  suppressSheetClick = true;
-  window.setTimeout(() => { suppressSheetClick = false; }, 160);
   const index = sheetPositions.indexOf(gesture.originalPosition);
-  let next;
-  if (gesture.delta > 48) {
-    next = sheetPositions[Math.min(sheetPositions.length - 1, index + (gesture.delta > 190 ? 2 : 1))];
-  } else if (gesture.delta < -48) {
-    next = sheetPositions[Math.max(0, index - (gesture.delta < -190 ? 2 : 1))];
-  } else {
-    next = closestSheetPosition(gesture.startingHeight + gesture.delta);
+  let next = gesture.originalPosition;
+  if (!cancelled) {
+    if ((event.timeStamp - gesture.lastTime) < 130 && Math.abs(gesture.velocity) > .6) {
+      // Short, quick flicks feel responsive without skipping several positions.
+      next = sheetPositions[Math.max(0, Math.min(2, index + Math.sign(gesture.velocity)))];
+    } else if (gesture.delta > 48) {
+      next = sheetPositions[Math.min(2, index + (gesture.delta > 190 ? 2 : 1))];
+    } else if (gesture.delta < -48) {
+      next = sheetPositions[Math.max(0, index - (gesture.delta < -190 ? 2 : 1))];
+    } else {
+      next = closestSheetPosition(endingHeight);
+    }
   }
-  sheet.style.transition = '';
   requestAnimationFrame(() => setSheetPosition(next));
 }
 window.addEventListener('pointerup', event => endSheetGesture(event));

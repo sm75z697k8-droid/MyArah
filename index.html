@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="description" content="MyArah — discover Malaysia, beautifully.">
   <title>MyArah — Explore Malaysia</title>
-  <link rel="preconnect" href="https://basemaps.cartocdn.com">
+  <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
   <link rel="stylesheet" href="styles.css">
   <script type="module" src="app.js"></script>
@@ -27,7 +27,7 @@
     <div class="map-controls">
       <button id="locate" class="control surface primary-control" aria-label="Show my location" title="My location"><svg viewBox="0 0 24 24"><path d="m12 3-7.5 17L12 16l7.5 4L12 3Z"/></svg></button>
       <button id="tilt" class="control surface text-control" aria-label="Switch to 3D map" aria-pressed="false" title="2D / 3D map">3D</button>
-      <button id="north" class="control surface" aria-label="Point map north" title="Reset compass"><svg viewBox="0 0 24 24"><path d="m12 3 5 18-5-4-5 4 5-18Z"/></svg></button>
+      <button id="north" class="control surface" aria-label="Point map north" title="Reset compass"><svg class="compass-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.1"/><path class="compass-north" d="M12 5.5 15.2 12 12 10.9 8.8 12 12 5.5Z"/><path class="compass-south" d="M12 18.5 8.8 12 12 13.1 15.2 12 12 18.5Z"/></svg></button>
     </div>
     <section id="bottomSheet" class="sheet surface" data-sheet-state="peek" aria-label="Explore destinations">
       <div id="sheetDragArea" class="sheet-drag-area">
