@@ -134,3 +134,121 @@ $('locate').addEventListener('click',()=>{
 map.on('error',event=>{console.warn('Map rendering error',event.error);toast('Map tiles unavailable. Check your internet connection.')});
 renderResults();
 setPlace(locations[0]);
+
+
+// Bottom sheet interaction (only UI changes; map engine and existing controls stay intact).
+const sheet = $('bottomSheet');
+const sheetDragArea = $('sheetDragArea');
+const sheetGrabber = $('sheetGrabber');
+const sheetScroll = $('sheetScroll');
+const sheetExtras = $('sheetExtras');
+const appRoot = document.querySelector('.app');
+const sheetPositions = ['peek', 'half', 'full'];
+let sheetPosition = 'peek';
+let sheetGesture = null;
+let suppressSheetClick = false;
+
+function sheetHeights() {
+  const viewport = appRoot.getBoundingClientRect().height;
+  const peek = Math.ceil(sheetDragArea.offsetHeight + $('browse').offsetHeight + 18);
+  const half = Math.max(peek + 92, Math.min(viewport * 0.44, 390));
+  const full = Math.max(half + 66, Math.min(viewport * 0.78, 700));
+  return {peek, half, full};
+}
+
+function setSheetHeight(height) {
+  appRoot.style.setProperty('--sheet-height', `${Math.round(height)}px`);
+}
+
+function setSheetPosition(position) {
+  if (!sheetPositions.includes(position)) return;
+  sheetPosition = position;
+  sheet.dataset.sheetState = position;
+  appRoot.classList.toggle('sheet-full', position === 'full');
+  appRoot.classList.toggle('sheet-half', position === 'half');
+  sheetGrabber.setAttribute('aria-expanded', String(position !== 'peek'));
+  sheetGrabber.setAttribute('aria-label', position === 'peek' ? 'Expand destinations panel' : 'Change destinations panel size');
+  sheetExtras.inert = position === 'peek';
+  sheetExtras.setAttribute('aria-hidden', String(position === 'peek'));
+  if (position === 'peek') sheetScroll.scrollTop = 0;
+  setSheetHeight(sheetHeights()[position]);
+}
+
+function closestSheetPosition(height) {
+  const heights = sheetHeights();
+  return sheetPositions.reduce((best, candidate) =>
+    Math.abs(heights[candidate] - height) < Math.abs(heights[best] - height) ? candidate : best
+  );
+}
+
+sheetDragArea.addEventListener('pointerdown', event => {
+  if (event.pointerType === 'mouse' && event.button !== 0) return;
+  sheetGesture = {
+    id: event.pointerId,
+    y: event.clientY,
+    startingHeight: sheetHeights()[sheetPosition],
+    originalPosition: sheetPosition,
+    delta: 0,
+    moved: false
+  };
+});
+
+window.addEventListener('pointermove', event => {
+  if (!sheetGesture || sheetGesture.id !== event.pointerId) return;
+  sheetGesture.delta = sheetGesture.y - event.clientY;
+  if (!sheetGesture.moved && Math.abs(sheetGesture.delta) < 7) return;
+  sheetGesture.moved = true;
+  sheet.style.transition = 'none';
+  const {peek, full} = sheetHeights();
+  setSheetHeight(Math.max(peek, Math.min(full, sheetGesture.startingHeight + sheetGesture.delta)));
+});
+
+function endSheetGesture(event, cancelled = false) {
+  if (!sheetGesture || sheetGesture.id !== event.pointerId) return;
+  const gesture = sheetGesture;
+  sheetGesture = null;
+  if (!gesture.moved || cancelled) {
+    if (cancelled) setSheetPosition(gesture.originalPosition);
+    return;
+  }
+  suppressSheetClick = true;
+  window.setTimeout(() => { suppressSheetClick = false; }, 160);
+  const index = sheetPositions.indexOf(gesture.originalPosition);
+  let next;
+  if (gesture.delta > 48) {
+    next = sheetPositions[Math.min(sheetPositions.length - 1, index + (gesture.delta > 190 ? 2 : 1))];
+  } else if (gesture.delta < -48) {
+    next = sheetPositions[Math.max(0, index - (gesture.delta < -190 ? 2 : 1))];
+  } else {
+    next = closestSheetPosition(gesture.startingHeight + gesture.delta);
+  }
+  sheet.style.transition = '';
+  requestAnimationFrame(() => setSheetPosition(next));
+}
+window.addEventListener('pointerup', event => endSheetGesture(event));
+window.addEventListener('pointercancel', event => endSheetGesture(event, true));
+
+// Tapping the grab handle/header is an alternative to dragging (also works with keyboard).
+sheetDragArea.addEventListener('click', event => {
+  if (suppressSheetClick) {
+    event.preventDefault();
+    suppressSheetClick = false;
+    return;
+  }
+  const nextIndex = (sheetPositions.indexOf(sheetPosition) + 1) % sheetPositions.length;
+  setSheetPosition(sheetPositions[nextIndex]);
+});
+
+// Show more map again once the user chooses a suggested city.
+document.querySelectorAll('.chips [data-place]').forEach(button => {
+  button.addEventListener('click', () => setSheetPosition('peek'));
+});
+$('results').addEventListener('click', event => {
+  if (event.target.closest('.result')) setSheetPosition('peek');
+});
+
+window.addEventListener('resize', () => {
+  if (!sheetGesture) setSheetPosition(sheetPosition);
+});
+// Start compact, preserving more visible map on iPhone.
+setSheetPosition('peek');

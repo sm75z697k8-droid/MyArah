@@ -3,3 +3,77 @@
 /* v4 addition: highlight the existing 2D/3D control; all v3 styling is preserved. */
 #tilt.is-active{background:rgba(225,240,252,.97);border-color:#9cc5e5;color:#2376b4}
 body.dark #tilt.is-active{background:#29445b;border-color:#5a89af;color:#b5dffd}
+
+
+/* MyArah bottom sheet update: preserve all existing v4 map and visual styles. */
+.app { --sheet-height: 166px; }
+.sheet {
+  height: var(--sheet-height);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  transition: height 290ms cubic-bezier(.22,.8,.22,1);
+  will-change: height;
+}
+.sheet-drag-area {
+  flex: 0 0 auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+.sheet-grabber {
+  display: flex;
+  width: 100%;
+  height: 29px;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  touch-action: none;
+  cursor: grab;
+}
+.sheet .handle { margin: 0; }
+.sheet .sheet-head {
+  margin: 0 19px 11px;
+  min-height: 43px;
+}
+.sheet-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 19px 17px;
+  touch-action: pan-y;
+}
+.sheet[data-sheet-state="peek"] .sheet-scroll {
+  overflow-y: hidden;
+}
+.sheet[data-sheet-state="peek"] .sheet-extras {
+  visibility: hidden;
+}
+.sheet .chips {
+  /* Keep the original horizontal scrolling without losing the last item. */
+  padding-bottom: 8px;
+}
+.map-controls {
+  bottom: calc(env(safe-area-inset-bottom) + var(--sheet-height) + 27px);
+  transition: bottom 290ms cubic-bezier(.22,.8,.22,1), opacity 180ms ease;
+}
+/* The full panel takes focus; keep map controls from appearing over it. */
+@media (max-width:699px) {
+  .app.sheet-full .map-controls { opacity: 0; pointer-events: none; }
+}
+@media (max-height:690px) and (max-width:699px) {
+  .app.sheet-half .map-controls { opacity: 0; pointer-events: none; }
+}
+@media (min-width:700px) {
+  .map-controls { bottom: 26px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .sheet, .map-controls { transition: none; }
+}

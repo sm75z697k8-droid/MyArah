@@ -29,15 +29,23 @@
       <button id="tilt" class="control surface text-control" aria-label="Switch to 3D map" aria-pressed="false" title="2D / 3D map">3D</button>
       <button id="north" class="control surface" aria-label="Point map north" title="Reset compass"><svg viewBox="0 0 24 24"><path d="m12 3 5 18-5-4-5 4 5-18Z"/></svg></button>
     </div>
-    <section class="sheet surface" aria-label="Explore destinations">
-      <div class="handle" aria-hidden="true"></div>
-      <div class="sheet-head"><div><span class="eyebrow">YOUR MAP, YOUR WAY</span><h1>Where to?</h1></div><span class="brand">My<span>Arah</span><span class="brand-dot">.</span></span></div>
-      <button id="browse" class="destination-button"><span class="dest-circle"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.4"/></svg></span><span class="dest-content"><strong>Find a destination</strong><small>Search cities across Malaysia</small></span><span class="chevron">›</span></button>
-      <div class="section-caption">EXPLORE MALAYSIA</div>
-      <div class="chips" aria-label="Popular places">
-        <button data-place="kl">Kuala Lumpur</button><button data-place="penang">George Town</button><button data-place="jb">Johor Bahru</button><button data-place="kk">Kota Kinabalu</button><button data-place="kuching">Kuching</button>
+    <section id="bottomSheet" class="sheet surface" data-sheet-state="peek" aria-label="Explore destinations">
+      <div id="sheetDragArea" class="sheet-drag-area">
+        <button id="sheetGrabber" class="sheet-grabber" type="button" aria-label="Expand destinations panel" aria-expanded="false" aria-controls="sheetScroll">
+          <span class="handle" aria-hidden="true"></span>
+        </button>
+        <div class="sheet-head"><div><span class="eyebrow">YOUR MAP, YOUR WAY</span><h1>Where to?</h1></div><span class="brand">My<span>Arah</span><span class="brand-dot">.</span></span></div>
       </div>
-      <div class="sheet-footer"><div class="status-dot"></div><span id="placeSubtitle">Map ready · Malaysia</span><button id="recenter" aria-label="Show selected city">View <span aria-hidden="true">↗</span></button></div>
+      <div id="sheetScroll" class="sheet-scroll" tabindex="0" aria-label="Destination options">
+        <button id="browse" class="destination-button"><span class="dest-circle"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.4"/></svg></span><span class="dest-content"><strong>Find a destination</strong><small>Search cities across Malaysia</small></span><span class="chevron">›</span></button>
+        <div id="sheetExtras" class="sheet-extras" inert aria-hidden="true">
+          <div class="section-caption">EXPLORE MALAYSIA</div>
+          <div class="chips" aria-label="Popular places">
+            <button data-place="kl">Kuala Lumpur</button><button data-place="penang">George Town</button><button data-place="jb">Johor Bahru</button><button data-place="kk">Kota Kinabalu</button><button data-place="kuching">Kuching</button>
+          </div>
+          <div class="sheet-footer"><div class="status-dot"></div><span id="placeSubtitle">Map ready · Malaysia</span><button id="recenter" aria-label="Show selected city">View <span aria-hidden="true">↗</span></button></div>
+        </div>
+      </div>
     </section>
     <div class="toast" id="notice" role="status" aria-live="polite" hidden></div>
     <div class="modal-backdrop" id="overlay" aria-hidden="true">

@@ -1,9 +1,10 @@
-# MyArah v4 — 2D / 3D Map Upgrade (built on your v3 files)
+# MyArah v4 — Compact Scrollable Bottom Sheet
 
 A minimal, premium, iPhone-first map prototype with an interactive map. Inspired by the clarity of modern navigation apps, without using Apple branding or proprietary assets.
 
 ## Included
 - Responsive map-first UI and iPhone safe-area support
+- **NEW:** compact-by-default bottom sheet with swipe-up/down positions, tappable grab handle, and vertically scrollable expanded content
 - Pan/zoom, five sample Malaysian city destinations, and animated map camera
 - Location button (needs browser permission and HTTPS)
 - Original light and dark CARTO basemaps, north reset, plus 2D and 3D map modes with *real building extrusions where OpenStreetMap geometry exists*
@@ -16,6 +17,14 @@ A minimal, premium, iPhone-first map prototype with an interactive map. Inspired
 4. Open the GitHub Pages URL in Safari. To install the shortcut, choose Share → Add to Home Screen.
 
 No build step, package manager, server, or API key is required for this demo. Internet access is needed for MapLibre, the original CARTO raster map, and (in 3D) OpenFreeMap building vector data. Switching light/dark rebuilds the 3D overlay automatically.
+
+## Using the bottom panel
+- At launch, the sheet takes up only enough space for **Where to?** and **Find a destination**.
+- Drag the handle or the heading upward to reveal the Malaysian city shortcuts; drag again to expand. Drag downward to collapse.
+- Tap the small handle to cycle through **compact → medium → expanded → compact**.
+- Once expanded, scroll **inside** the panel vertically; the map behind it remains pannable outside the panel.
+- City selection collapses the sheet to show the map again.
+- These changes affect only the bottom panel and its associated controls; the existing OpenFreeMap map, 2D/3D toggle, GPS and dark mode are preserved.
 
 ## Limitations
 - Search uses only the five sample cities; not a live Malaysian addresses database.
