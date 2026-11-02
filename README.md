@@ -237,3 +237,13 @@ compass, or bottom-sheet design.
 3. Tap Done and dismiss the keyboard. The map and bottom sheet should return
    to their full-screen positions.
 4. Repeat in Traffic settings, and try portrait/landscape if supported.
+
+
+## Keyboard recovery v2 (replaces the earlier fix)
+
+- In Home Screen mode, MyArah now locks the map to the full *available webpage height* measured before keyboard focus, rather than relying on potentially changing `100dvh` or `visualViewport.height`.
+- The search and traffic dialogs move into the keyboard-visible area while typing. The map itself retains its original height and is resized after keyboard dismissal.
+- Removed delayed keyboard autofocus that could cause iOS to scroll the page while the dialog opens. Tap the search field or traffic key field to bring up the keyboard.
+- The map and other features are unchanged.
+- **Diagnostics:** If a gap is still visible, open the website with `?viewportDebug=1` appended to its GitHub Pages URL (or `&viewportDebug=1` if it already has query parameters). The small panel displays iOS viewport measurements—take one screenshot before opening the keyboard and another after closing it, and share them. Tap the panel to minimize it. It does not display your location or API key.
+- **iOS limitation:** In some Home Screen PWA versions, WebKit reserves a strip *outside* the webpage's viewport. CSS/JS cannot draw into that strip. Refer to https://bugs.webkit.org/show_bug.cgi?id=301994 (reopened in 2026). A fixed frame cannot override OS-owned letterboxing.

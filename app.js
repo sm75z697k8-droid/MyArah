@@ -242,7 +242,8 @@ function renderRecentSearch() {
 function openSearch() {
   const overlay=$('overlay');overlay.classList.add('open');overlay.setAttribute('aria-hidden','false');
   $('searchInput').value='';renderRecentSearch();
-  setTimeout(()=>$('searchInput').focus(),140);
+  // Do not defer autofocus on iOS: it can scroll the whole viewport while
+  // the modal animates. Tap the input to start typing.
 }
 function closeSearch() {
   $('overlay').classList.remove('open');$('overlay').setAttribute('aria-hidden','true');
@@ -661,64 +662,136 @@ window.addEventListener('resize', () => {
 // Start compact, preserving more visible map on iPhone.
 setSheetPosition('peek');
 
-// iOS Safari and Home Screen apps have separate layout and visual viewports.
-// Opening the keyboard shrinks/moves the visible area, but must NOT make
-// the map's full-screen container permanently shorter.
-let viewportResizeFrame = 0;
-let keyboardRecoveryTimers = [];
-function syncMyArahKeyboard() {
-  const vp = window.visualViewport;
-  const appHeight = appRoot.getBoundingClientRect().height;
-  const top = Math.max(0, vp?.offsetTop ?? 0);
-  const visibleHeight = Math.max(1, vp?.height ?? appHeight);
-  const coveredBottom = Math.max(0, appHeight - top - visibleHeight);
-  // Require focus AND substantial obstruction, to avoid treating an iOS
-  // toolbar/safe-area change as an on-screen keyboard.
-  const keyboardOpen = myarahTextFieldActive() && coveredBottom > 110;
-  appRoot.classList.toggle('keyboard-open', keyboardOpen);
-  appRoot.style.setProperty('--myarah-visual-top', keyboardOpen ? `${Math.round(top)}px` : '0px');
-  appRoot.style.setProperty('--myarah-keyboard-bottom', keyboardOpen ? `${Math.round(coveredBottom)}px` : '0px');
-  appRoot.style.setProperty('--myarah-visible-height', keyboardOpen ? `${Math.round(visibleHeight)}px` : `${Math.round(appHeight)}px`);
-  return keyboardOpen;
+// MyArah keyboard recovery v2 (standalone iPhone + Safari).
+// Lock the map to the largest *real webpage viewport* seen outside text input.
+// Never shrink the map to the temporary keyboard visual viewport. We cannot
+// extend into strips owned by iOS outside the webpage's actual viewport.
+const myarahStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+if (myarahStandalone) document.documentElement.classList.add('myarah-is-standalone');
+let myarahFrameHeight = 0;
+let myarahViewportFrame = 0;
+let myarahRecoveryTimers = [];
+const myarahDebugEnabled = new URLSearchParams(location.search).has('viewportDebug');
+let myarahDebugPanel = null;
+
+function myarahLayoutHeight() {
+  return Math.max(
+    1,
+    window.innerHeight || 0,
+    document.documentElement.clientHeight || 0,
+    window.visualViewport ? Math.round(window.visualViewport.height + Math.max(0, window.visualViewport.offsetTop)) : 0
+  );
 }
-function refreshMyArahViewport() {
-  if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame);
-  viewportResizeFrame = requestAnimationFrame(() => {
-    viewportResizeFrame = 0;
-    if (syncMyArahKeyboard()) return; // don't shrink the map to keyboard height
-    map.resize();
-    if (!sheetGesture && !myarahTextFieldActive()) setSheetPosition(sheetPosition);
+
+function myarahLockFrame(reset = false) {
+  // CSS 100lvh can be greater than 100dvh in normal Safari; use a locked
+  // height only in the installed Home Screen web app.
+  if (!myarahStandalone) return;
+  const observed = myarahLayoutHeight();
+  if (reset) myarahFrameHeight = 0;
+  if (!myarahFrameHeight || (!myarahTextFieldActive() && observed > myarahFrameHeight)) {
+    myarahFrameHeight = Math.round(observed);
+  }
+  if (myarahFrameHeight) {
+    document.documentElement.style.setProperty('--myarah-locked-height', myarahFrameHeight + 'px');
+  }
+}
+
+function myarahDebugText() {
+  const vv = window.visualViewport;
+  const h = Math.round(appRoot.getBoundingClientRect().height);
+  const top = Math.round(appRoot.getBoundingClientRect().top);
+  const screenH = window.screen?.height ?? 0;
+  return `MyArah viewport (diagnostics only)\n` +
+    `Standalone: ${myarahStandalone} · Input: ${myarahTextFieldActive()}\n` +
+    `Screen: ${screenH} · inner: ${window.innerHeight} · root: ${document.documentElement.clientHeight}\n` +
+    `Visual: ${Math.round(vv?.height || 0)} · offset: ${Math.round(vv?.offsetTop || 0)}\n` +
+    `App: ${h} · top: ${top} · locked: ${myarahFrameHeight}\n` +
+    `Keyboard: ${appRoot.classList.contains('keyboard-open')}`;
+}
+
+if (myarahDebugEnabled) {
+  myarahDebugPanel = document.createElement('pre');
+  myarahDebugPanel.id = 'myarahViewportDebug';
+  myarahDebugPanel.setAttribute('role', 'status');
+  myarahDebugPanel.setAttribute('aria-label', 'Viewport diagnostic');
+  myarahDebugPanel.textContent = 'Viewport diagnostic loading…';
+  appRoot.appendChild(myarahDebugPanel);
+  myarahDebugPanel.addEventListener('click', () => {
+    myarahDebugPanel.classList.toggle('is-minimized');
   });
 }
-function recoverMyArahAfterKeyboard() {
-  for (const timer of keyboardRecoveryTimers) clearTimeout(timer);
-  keyboardRecoveryTimers = [];
-  // WebKit may restore its offset over several frames after keyboard dismissal.
-  for (const delay of [0, 120, 350, 650]) {
-    keyboardRecoveryTimers.push(setTimeout(() => {
+
+function myarahUpdateViewport() {
+  const vv = window.visualViewport;
+  const appHeight = appRoot.getBoundingClientRect().height;
+  const visualTop = Math.max(0, vv?.offsetTop || 0);
+  const visualHeight = Math.max(1, vv?.height || appHeight);
+  const obstruction = Math.max(0, appHeight - visualTop - visualHeight);
+  const keyboard = myarahTextFieldActive() && obstruction > 115;
+
+  appRoot.classList.toggle('keyboard-open', keyboard);
+  appRoot.style.setProperty('--myarah-visual-top', keyboard ? `${Math.round(visualTop)}px` : '0px');
+  appRoot.style.setProperty('--myarah-keyboard-bottom', keyboard ? `${Math.round(obstruction)}px` : '0px');
+  appRoot.style.setProperty('--myarah-visible-height', `${Math.round(keyboard ? visualHeight : appHeight)}px`);
+
+  if (!keyboard) {
+    myarahLockFrame();
+    // A visualViewport change can alter canvas bounds even when the CSS
+    // height remains locked. Resize MapLibre using its real container size.
+    map.resize();
+    if (!sheetGesture && !myarahTextFieldActive()) setSheetPosition(sheetPosition);
+  }
+  if (myarahDebugPanel) myarahDebugPanel.textContent = myarahDebugText();
+}
+
+function myarahScheduleViewportUpdate() {
+  if (myarahViewportFrame) cancelAnimationFrame(myarahViewportFrame);
+  myarahViewportFrame = requestAnimationFrame(() => {
+    myarahViewportFrame = 0;
+    myarahUpdateViewport();
+  });
+}
+
+function myarahRecoverViewport() {
+  for (const timer of myarahRecoveryTimers) clearTimeout(timer);
+  myarahRecoveryTimers = [];
+  for (const ms of [0, 100, 250, 450, 850, 1400]) {
+    myarahRecoveryTimers.push(setTimeout(() => {
       if (myarahTextFieldActive()) return;
-      // Scroll recovery is harmless if the root is already locked at zero.
       window.scrollTo(0, 0);
       document.documentElement.scrollTop = 0;
       document.body.scrollTop = 0;
-      refreshMyArahViewport();
-    }, delay));
+      myarahScheduleViewportUpdate();
+    }, ms));
   }
 }
-window.visualViewport?.addEventListener('resize', refreshMyArahViewport);
-window.visualViewport?.addEventListener('scroll', refreshMyArahViewport);
-window.addEventListener('orientationchange', refreshMyArahViewport);
-window.addEventListener('pageshow', recoverMyArahAfterKeyboard);
+
+myarahLockFrame();
+window.visualViewport?.addEventListener('resize', myarahScheduleViewportUpdate);
+window.visualViewport?.addEventListener('scroll', myarahScheduleViewportUpdate);
+window.addEventListener('resize', myarahScheduleViewportUpdate);
+window.addEventListener('orientationchange', () => {
+  // A rotation changes the available height legitimately.
+  myarahFrameHeight = 0;
+  myarahLockFrame(true);
+  myarahRecoverViewport();
+});
+window.addEventListener('pageshow', myarahRecoverViewport);
 document.addEventListener('focusin', event => {
-  if (event.target.matches?.('input, textarea, [contenteditable="true"]')) refreshMyArahViewport();
+  if (event.target.matches?.('input,textarea,[contenteditable="true"]')) {
+    myarahScheduleViewportUpdate();
+    // Keyboard metrics may arrive later than the focus event on iOS.
+    setTimeout(myarahScheduleViewportUpdate, 250);
+  }
 });
 document.addEventListener('focusout', event => {
-  if (event.target.matches?.('input, textarea, [contenteditable="true"]')) recoverMyArahAfterKeyboard();
+  if (event.target.matches?.('input,textarea,[contenteditable="true"]')) myarahRecoverViewport();
 });
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) recoverMyArahAfterKeyboard();
+  if (!document.hidden) myarahRecoverViewport();
 });
-refreshMyArahViewport();
+myarahScheduleViewportUpdate();
 
 
 // === Optional live traffic overlay (TomTom Orbis v2 raster flow tiles). ===
@@ -900,11 +973,11 @@ function openTrafficDialog() {
   $('trafficKeyVisibility').textContent = 'Show';
   setTrafficMessage(trafficOn ? 'Traffic is active. Add a different key to reconnect.' : 'Paste a TomTom Traffic API key to enable live road conditions.');
   trafficDialog.hidden = false;
-  requestAnimationFrame(() => trafficKeyInput.focus());
+  // No asynchronous keyboard autofocus; tap the field to open the keyboard.
 }
 function closeTrafficDialog() {
   trafficDialog.hidden = true;
-  trafficPreviousFocus?.focus?.();
+  trafficPreviousFocus?.focus?.({preventScroll:true});
 }
 
 trafficToggle.addEventListener('click', () => {

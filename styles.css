@@ -667,9 +667,20 @@ body.dark .map-controls .primary-control::after {
 }
 
 
-/* MyArah iPhone keyboard / fullscreen stabilization.
-   Keep the map at its existing full-height layout; only overlays adapt to
-   the *visual* viewport while iOS's keyboard covers the lower screen. */
+/* MyArah keyboard / viewport recovery v2.
+   Only lock height in installed apps; regular Safari still uses 100dvh.
+   The value is initialized before keyboard focus and never shrinks during typing. */
+:root { --myarah-locked-height: 100lvh; }
+@media (display-mode: standalone) {
+  html, body { height: var(--myarah-locked-height); max-height: none; }
+  .app { height: var(--myarah-locked-height); max-height: none; }
+}
+@supports (-webkit-touch-callout: none) {
+  /* iOS Add-to-Home-Screen may expose navigator.standalone without matching
+     display-mode yet. JS adds this class for that case. */
+  html.myarah-is-standalone, html.myarah-is-standalone body,
+  html.myarah-is-standalone .app {height: var(--myarah-locked-height);}
+}
 .app {
   --myarah-visual-top: 0px;
   --myarah-keyboard-bottom: 0px;
@@ -682,15 +693,22 @@ body.dark .map-controls .primary-control::after {
 }
 .app.keyboard-open .search-modal,
 .app.keyboard-open .traffic-dialog {
-  max-height: calc(var(--myarah-visible-height) - 8px);
+  max-height: calc(var(--myarah-visible-height) - 10px);
 }
 .app.keyboard-open .search-modal {
-  height: min(75dvh, calc(var(--myarah-visible-height) - 8px));
-  padding-bottom: 16px;
+  height: min(75dvh, calc(var(--myarah-visible-height) - 10px));
+  padding-bottom: 15px;
 }
-.app.keyboard-open .traffic-dialog {
-  padding-bottom: 16px;
-}
-/* Prevent iOS from scrolling the full page to make focused inputs visible.
-   The search/traffic dialogs keep their own scroll areas. */
+.app.keyboard-open .traffic-dialog { padding-bottom: 15px; }
 html, body { overscroll-behavior: none; }
+#myarahViewportDebug {
+  position: absolute; z-index: 10000;
+  left: 8px; bottom: calc(env(safe-area-inset-bottom) + 10px);
+  color: white; background: rgba(12,29,47,.92);
+  border: 1px solid rgba(150,200,240,.35); border-radius: 10px;
+  font: 11px/1.42 ui-monospace, Menlo, monospace;
+  padding: 9px 11px; margin: 0; white-space: pre-wrap;
+  max-width: min(96vw, 380px); pointer-events: auto;
+  box-shadow: 0 4px 16px rgba(0,0,0,.20);
+}
+#myarahViewportDebug.is-minimized {max-width: 38px; max-height: 26px; overflow: hidden;}
