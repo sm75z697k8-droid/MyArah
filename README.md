@@ -1,28 +1,24 @@
-# MyArah v3 — Malaysia Map UI
+# MyArah v4 — 2D / 3D map
 
-A minimal, premium, iPhone-first map prototype with an interactive map. Inspired by the clarity of modern navigation apps, without using Apple branding or proprietary assets.
+A minimal, mobile-first Malaysian map prototype designed for GitHub Pages and iPhone Safari.
 
-## Included
-- Responsive map-first UI and iPhone safe-area support
-- Pan/zoom, five sample Malaysian city destinations, and animated map camera
-- Location button (needs browser permission and HTTPS)
-- Light and dark basemaps, tilted camera (3D perspective, **not** 3D buildings), north reset
-- Accessible search dialog, reduced-motion preferences, and proper map attribution
+## Upload to GitHub Pages
+Upload `index.html`, `styles.css`, `app.js`, and this `README.md` to the root of the existing MyArah repository. In Settings → Pages, deploy from the `main` branch and `/ (root)`. No build step required.
 
-## Publish on GitHub Pages from an iPhone
-1. Create or open a GitHub repository.
-2. Upload `index.html`, `styles.css`, `app.js`, and this `README.md` to the **root** of the repository.
-3. Go to Settings → Pages → Deploy from a branch → `main` → `/ (root)` → Save.
-4. Open the GitHub Pages URL in Safari. To install the shortcut, choose Share → Add to Home Screen.
+## Features
+- Interactive map using MapLibre GL JS and OpenFreeMap vector map styles
+- 2D top-down and 3D perspective modes, with 3D buildings **only where the underlying vector style exposes building polygons**
+- Light/dark styles, north reset, zoom, user GPS location (permission required)
+- Ten sample Malaysian city shortcuts
+- iPhone safe-area-aware map UI
 
-No build step, package manager, server, or API key is required for this demo. Internet access is needed to load MapLibre and tiles from their public hosting services.
+## Notes
+- This is a **map prototype**, not a navigation or traffic app. It does not calculate routes, search arbitrary addresses or provide turn-by-turn directions.
+- 3D mode always tilts the map; 3D buildings depend on map data and may not appear at all locations.
+- Map and MapLibre scripts require an internet connection. OpenFreeMap hosting is operated by a third party; check the provider's terms and capacity before a production launch.
+- Geolocation requires HTTPS and user permission; GitHub Pages supplies HTTPS.
+- Preserve map attribution and comply with OpenStreetMap / map-provider requirements.
 
-## Limitations
-- Search uses only the five sample cities; not a live Malaysian addresses database.
-- No driving route, turn-by-turn navigation, traffic, spoken directions, or flood/toll data.
-- The 3D toggle tilts a raster map, it does not show extruded buildings.
-- GPS is a one-time location fix, not continuous navigation tracking.
-- Public tile/demo hosting has usage terms and limits. For a production navigation service, select a properly licensed map tile provider and routing/geocoding APIs.
-
-## Credits
-Map engine: [MapLibre GL JS](https://maplibre.org/). Map imagery: [CARTO basemaps](https://carto.com/basemaps/) and [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Attribution appears on the map.
+## Source
+- MapLibre: https://maplibre.org/maplibre-gl-js/docs/
+- OpenFreeMap: https://openfreemap.org/
