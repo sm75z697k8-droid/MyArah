@@ -8,7 +8,7 @@ const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matc
 // Light and dark use the same map engine and preserve the existing UI.
 const mapStyle = isDark => `https://tiles.openfreemap.org/styles/${isDark ? 'dark' : 'positron'}`;
 const map = new maplibregl.Map({container:'map',style:mapStyle(false),center:INITIAL_VIEW.center,zoom:INITIAL_VIEW.zoom,pitch:0,bearing:0,attributionControl:true,canvasContextAttributes:{antialias:true}});
-let dark=false,tilted=false,chosen=null,selectedMarker=null,userMarker=null,toastTimer;
+let dark=false,tilted=false,chosen=null,userMarker=null,toastTimer;
 
 // v4 map-only enhancement: keep the existing OpenFreeMap basemap.
 // An optional OpenFreeMap vector layer supplies real building geometry in 3D.
@@ -98,12 +98,104 @@ function normalizeResult(item) {
   const detail=full.slice(0,260);
   return {id:String(item.place_id||`${lat}:${lng}`),name,detail,coords:[lng,lat],zoom:zoomForResult(item)};
 }
+// Selected search destination is a native MapLibre GeoJSON + symbol layer.
+// Unlike a separate HTML marker, this draws in the same map coordinate system
+// as streets and remains geo-anchored through pan, zoom, pitch and rotation.
+const SELECTED_PIN_SOURCE = 'myarah-selected-place-source';
+const SELECTED_PIN_LAYER = 'myarah-selected-place-pin';
+const SELECTED_PIN_ICON = 'myarah-selected-place-icon';
+let pinStyleReady = false;
+
+function selectedPlaceData() {
+  return {
+    type: 'FeatureCollection',
+    features: chosen && Array.isArray(chosen.coords) ? [{
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [...chosen.coords] },
+      properties: { name: chosen.name || 'Destination' }
+    }] : []
+  };
+}
+
+function drawSelectedPinIcon() {
+  // Hi-DPI icon: 44 x 58 CSS px backed by 88 x 116 physical pixels.
+  // Its pointed tip sits at the map coordinate via icon-anchor: bottom.
+  const canvas = document.createElement('canvas');
+  canvas.width = 88;
+  canvas.height = 116;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.scale(2, 2);
+  ctx.beginPath();
+  ctx.moveTo(22, 57);
+  ctx.bezierCurveTo(18, 49, 6, 33, 6, 21);
+  ctx.bezierCurveTo(6, 11, 13, 5, 22, 5);
+  ctx.bezierCurveTo(31, 5, 38, 11, 38, 21);
+  ctx.bezierCurveTo(38, 33, 26, 49, 22, 57);
+  ctx.closePath();
+  ctx.shadowColor = 'rgba(20, 48, 80, .33)';
+  ctx.shadowBlur = 5;
+  ctx.shadowOffsetY = 2;
+  ctx.fillStyle = '#287dd1';
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#fff';
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(22, 21, 6.3, 0, 2 * Math.PI);
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
+
+function syncSelectedPlacePin() {
+  // A style switch removes images, layers and sources. Recreate if needed.
+  if (!pinStyleReady) return;
+  if (!map.hasImage(SELECTED_PIN_ICON)) {
+    const image = drawSelectedPinIcon();
+    if (!image) return;
+    map.addImage(SELECTED_PIN_ICON, image, { pixelRatio: 2 });
+  }
+  let source = map.getSource(SELECTED_PIN_SOURCE);
+  if (!source) {
+    map.addSource(SELECTED_PIN_SOURCE, {
+      type: 'geojson', data: selectedPlaceData()
+    });
+    source = map.getSource(SELECTED_PIN_SOURCE);
+  } else {
+    source.setData(selectedPlaceData());
+  }
+  if (!map.getLayer(SELECTED_PIN_LAYER)) {
+    map.addLayer({
+      id: SELECTED_PIN_LAYER,
+      type: 'symbol',
+      source: SELECTED_PIN_SOURCE,
+      layout: {
+        'icon-image': SELECTED_PIN_ICON,
+        'icon-anchor': 'bottom',
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'icon-pitch-alignment': 'viewport',
+        'icon-rotation-alignment': 'viewport'
+      }
+    });
+  }
+  // Always keep the pin above roads and the optional traffic overlay.
+  map.moveLayer(SELECTED_PIN_LAYER);
+}
+map.on('style.load', () => {
+  pinStyleReady = true;
+  syncSelectedPlacePin();
+});
+
 function setPlace(place) {
   chosen=place;
   map.flyTo({center:place.coords,...cameraFor(place.zoom),duration:motion(),essential:true});
-  if(selectedMarker) selectedMarker.remove();
-  const pin=document.createElement('div');pin.className='city-marker';pin.setAttribute('aria-label',place.name);
-  selectedMarker=new maplibregl.Marker({element:pin}).setLngLat(place.coords).addTo(map);
+  // Marker uses map-native coordinates, not an independent DOM position.
+  syncSelectedPlacePin();
   $('placeSubtitle').textContent=place.name;
   recentPlaces=[place,...recentPlaces.filter(item=>item.id!==place.id)].slice(0,MAX_RECENT);
   storeJson(RECENT_KEY,recentPlaces);
@@ -242,6 +334,7 @@ $('recenter').addEventListener('click',()=>map.flyTo({
 renderRecentPlaces();
 $('theme').addEventListener('click',()=>{
   dark=!dark;document.body.classList.toggle('dark',dark);
+  pinStyleReady = false; // Restore the selected pin on the new style.load event.
   map.setStyle(mapStyle(dark));
   $('theme').setAttribute('aria-label',dark?'Switch to light map':'Switch to dark map');
   $('theme').setAttribute('aria-pressed',String(dark));
@@ -657,6 +750,8 @@ function installTrafficLayer() {
       paint: { 'raster-opacity': 0.91, 'raster-fade-duration': 230 }
     }, labelLayer);
   }
+  // Search pins must stay visible over colored traffic raster tiles.
+  if (map.getLayer(SELECTED_PIN_LAYER)) map.moveLayer(SELECTED_PIN_LAYER);
 }
 
 function refreshTraffic() {

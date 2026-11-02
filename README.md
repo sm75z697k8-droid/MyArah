@@ -161,3 +161,12 @@ the updated assets instead of previously cached copies. No build or installation
 
 References: TomTom Raster Flow Tiles (Orbis v2), MapLibre raster source tileSize
 specification, WebKit `touch-action: manipulation`.
+
+## Search pin accuracy update
+
+- The selected search location uses a **GeoJSON source and MapLibre symbol layer** instead of a floating HTML marker. The tip of the blue destination pin points to the result's longitude/latitude and stays geographically anchored while panning, zooming and using 2D/3D.
+- The high-resolution destination icon is generated locally: no external icon requests or new API key.
+- The destination pin is restored after light/dark style changes and kept above traffic colors. The blue GPS location dot and heading cone are unchanged.
+- No city sample data is added; your real Malaysia search and recent places remain as they were.
+- **Search accuracy:** Nominatim may return the centre of a building, street, park or district, not a specific entrance. This update fixes the *display anchoring*, not the geocoder's source coordinates or missing map data.
+- On GitHub Pages, replace `app.js` and `index.html`. The CSS is unchanged; the HTML cache-busting query helps Safari load the latest script.
