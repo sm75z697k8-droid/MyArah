@@ -170,3 +170,19 @@ specification, WebKit `touch-action: manipulation`.
 - No city sample data is added; your real Malaysia search and recent places remain as they were.
 - **Search accuracy:** Nominatim may return the centre of a building, street, park or district, not a specific entrance. This update fixes the *display anchoring*, not the geocoder's source coordinates or missing map data.
 - On GitHub Pages, replace `app.js` and `index.html`. The CSS is unchanged; the HTML cache-busting query helps Safari load the latest script.
+
+
+## NEW — Traffic-aware route suggestions (MyArah Routing Preview)
+
+After searching for and selecting a destination, press **Compare driving routes** in the compact bottom panel. MyArah now requests **up to three actual driving routes** from the TomTom Orbis Routing API v3 (one primary route + up to two different alternatives), sorts them by **provider-reported traffic-aware travel duration**, and draws them on your map.
+
+- Your starting point is your **current GPS location** (requires permission and HTTPS). If you cannot or prefer not to share GPS, open route comparison and use **Choose start on map**, then tap the exact starting point on the map.
+- The route cards show ETA, distance, traffic delay if reported, and whether toll sections were reported. Blue = selected route, grey = other routes. Tap a card to highlight its exact geometry.
+- TomTom calculates routes using live traffic and closures where data is available (`traffic: live`, `routeType: fast`, `maxPathAlternativeRoutes: 2`). It may return **one or two**, not necessarily three. We never invent alternatives or road delays.
+- The existing traffic-overlay **TomTom API key** is reused only from this browser's local storage; it is **not embedded in the project**. Routing may require the Routing API product to be enabled on your key and is subject to a **separate usage quota/billing** from traffic raster tiles. Configure your TomTom key using the existing Traffic settings.
+- Route preview does **not** implement live turn-by-turn navigation or automatic route recalculation. Times are estimates that can change; traffic and closures may be incomplete. Flooding or local incidents are **not independently verified**.
+- TomTom uses its **Orbis routing v3 POST API**: https://docs.tomtom.com/routing-api/documentation/tomtom-orbis-maps/v3/calculate-route . The API must permit browser requests from your GitHub Pages origin. If CORS or key restrictions block a request, MyArah shows an error instead of fake route data.
+- **Safety/privacy:** your trip start and destination coordinates are sent to TomTom only when you request a route. Don't expose the API key in GitHub; use approved key restrictions or a backend for public deployment. Your key remains visible to your own browser's network requests.
+- Keep all four files together in your repository root. `index.html` contains a versioned `app.js` and `styles.css` reference to avoid stale iPhone caching.
+
+This update only modifies the route comparison UI, the map route layers, and related code. Existing search, traffic visualization, GPS direction cone, 2D/3D buildings, and bottom-sheet gestures are retained.

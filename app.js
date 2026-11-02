@@ -201,6 +201,8 @@ function setPlace(place) {
   storeJson(RECENT_KEY,recentPlaces);
   renderRecentPlaces();
   closeSearch();
+  // New destination: discard stale routes and enable the comparison action.
+  resetRouteComparison();
   // The panel stays compact after a destination is chosen.
   setSheetPosition('peek');
 }
@@ -524,7 +526,9 @@ function flushDragHeight(height) {
 
 function sheetHeights() {
   const viewport = appRoot.getBoundingClientRect().height;
-  const peek = Math.ceil(sheetDragArea.offsetHeight + $('browse').offsetHeight + 18);
+  const routeAction = $('routePlan');
+  const routeActionHeight = routeAction && !routeAction.hidden ? routeAction.offsetHeight + 12 : 0;
+  const peek = Math.ceil(sheetDragArea.offsetHeight + $('browse').offsetHeight + routeActionHeight + 18);
   const half = Math.max(peek + 92, Math.min(viewport * 0.44, 390));
   const full = Math.max(half + 66, Math.min(viewport * 0.78, 700));
   return {peek, half, full};
@@ -750,7 +754,11 @@ function installTrafficLayer() {
       paint: { 'raster-opacity': 0.91, 'raster-fade-duration': 230 }
     }, labelLayer);
   }
-  // Search pins must stay visible over colored traffic raster tiles.
+  // Routes and destination pins must stay visible above the traffic raster.
+  for (const id of (typeof ROUTE_LAYERS !== 'undefined' ? ROUTE_LAYERS : [])) {
+    if (map.getLayer(id)) map.moveLayer(id, labelLayer);
+  }
+  if (map.getLayer('myarah-route-start-dot')) map.moveLayer('myarah-route-start-dot', labelLayer);
   if (map.getLayer(SELECTED_PIN_LAYER)) map.moveLayer(SELECTED_PIN_LAYER);
 }
 
@@ -888,3 +896,330 @@ setTrafficVisuals();
 // Only reconnect automatically after a successful user-initiated connection.
 // The key stays in this device's browser storage; it is never committed to GitHub.
 if (trafficKey && trafficAutoResume) void turnTrafficOn(trafficKey, { quiet: true });
+
+
+// === MyArah: traffic-aware driving route comparison (TomTom Orbis Routing v3). ===
+// One provider request returns a best route and up to two *genuinely distinct*
+// alternatives. We show fewer when TomTom has fewer. Never synthesize routes.
+// The API key is read only from the existing traffic settings on this device.
+const ROUTE_ENDPOINT = 'https://api.tomtom.com/maps/orbis/routing/routes/calculate?apiVersion=3';
+const ROUTE_SOURCE = 'myarah-route-geometry';
+const ROUTE_START_SOURCE = 'myarah-route-start';
+const ROUTE_LAYERS = ['myarah-route-alternative', 'myarah-route-selected-border', 'myarah-route-selected'];
+const routePlanButton = $('routePlan');
+const routePreview = $('routePreview');
+const routeCards = $('routeCards');
+let routeOrigin = null;
+let routeOptions = [];
+let routeSelected = 0;
+let routeJob = 0;
+let routeAbort = null;
+let routePickMode = false;
+let routeBusy = false;
+let routeRequestDestinationId = null;
+
+function setRouteStatus(message, error = false) {
+  const node = $('routeStatus');
+  node.textContent = message;
+  node.classList.toggle('is-error', error);
+}
+
+function routeGeojson() {
+  return { type: 'FeatureCollection', features: routeOptions.map((route, index) => ({
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: route.coordinates },
+    properties: { index, selected: index === routeSelected ? 1 : 0 }
+  })) };
+}
+
+function routeStartGeojson() {
+  return { type: 'FeatureCollection', features: routeOrigin ? [{
+    type: 'Feature', geometry: { type: 'Point', coordinates: routeOrigin.coords }, properties: {}
+  }] : [] };
+}
+
+function syncRouteLayers() {
+  const style = map.getStyle();
+  if (!style?.layers?.length) return;
+  const layers = style.layers;
+  const before = layers.find(layer => layer.type === 'symbol' && layer.id !== SELECTED_PIN_LAYER)?.id;
+  if (!map.getSource(ROUTE_SOURCE)) map.addSource(ROUTE_SOURCE, {type:'geojson', data: routeGeojson()});
+  else map.getSource(ROUTE_SOURCE).setData(routeGeojson());
+  if (!map.getSource(ROUTE_START_SOURCE)) map.addSource(ROUTE_START_SOURCE, {type:'geojson', data:routeStartGeojson()});
+  else map.getSource(ROUTE_START_SOURCE).setData(routeStartGeojson());
+  const add = (name, filter, color, width, blur=0) => {
+    if (map.getLayer(name)) return;
+    map.addLayer({id:name,type:'line',source:ROUTE_SOURCE,filter,
+      layout:{'line-join':'round','line-cap':'round'},
+      paint:{'line-color':color,'line-width':width,'line-opacity':0.97,'line-blur':blur}
+    }, before);
+  };
+  // Draw alternatives first, then a white casing and blue primary route.
+  add(ROUTE_LAYERS[0], ['==',['get','selected'],0], dark ? '#9cabb8' : '#8096aa',
+      ['interpolate',['linear'],['zoom'],9,3,14,5,18,8]);
+  add(ROUTE_LAYERS[1], ['==',['get','selected'],1], dark ? '#172938' : '#ffffff',
+      ['interpolate',['linear'],['zoom'],9,7,14,10,18,14]);
+  add(ROUTE_LAYERS[2], ['==',['get','selected'],1], '#2383dc',
+      ['interpolate',['linear'],['zoom'],9,4,14,6,18,9]);
+  if (!map.getLayer('myarah-route-start-dot')) {
+    map.addLayer({id:'myarah-route-start-dot',type:'circle',source:ROUTE_START_SOURCE,
+      paint:{'circle-radius':7,'circle-color':'#159c7c','circle-stroke-width':3,'circle-stroke-color':'#ffffff'}
+    });
+  }
+  // Keep the accurate destination pin on top of route geometry.
+  if (map.getLayer(SELECTED_PIN_LAYER)) map.moveLayer(SELECTED_PIN_LAYER);
+}
+map.on('style.load', () => { requestAnimationFrame(syncRouteLayers); });
+
+function clearRouteGeometry() {
+  routeOptions = [];
+  routeSelected = 0;
+  routeCards.replaceChildren();
+  if (map.getSource(ROUTE_SOURCE)) map.getSource(ROUTE_SOURCE).setData(routeGeojson());
+}
+
+function endRoutePick() {
+  routePickMode = false;
+  $('routePickBanner').hidden = true;
+  map.getCanvas().style.cursor = '';
+}
+
+function cancelRouteRequest() {
+  routeJob++;
+  routeAbort?.abort(); routeAbort = null;
+  routeBusy = false;
+  routePlanButton.disabled = false;
+  routePlanButton.firstChild.textContent = 'Compare driving routes ';
+}
+
+function resetRouteComparison() {
+  cancelRouteRequest();
+  endRoutePick();
+  routeOrigin = null;
+  routeRequestDestinationId = null;
+  clearRouteGeometry();
+  if (map.getSource(ROUTE_START_SOURCE)) map.getSource(ROUTE_START_SOURCE).setData(routeStartGeojson());
+  routePlanButton.hidden = !chosen;
+  routePreview.hidden = true;
+  $('routeDestination').textContent = chosen?.name || '';
+}
+
+function routeDuration(seconds) {
+  const minutes = Math.max(1, Math.round(seconds/60));
+  return minutes >= 60 ? `${Math.floor(minutes/60)} hr ${minutes%60 ? `${minutes%60} min` : ''}`.trim() : `${minutes} min`;
+}
+function routeDistance(meters) {
+  return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
+}
+
+function normalizeProviderRoutes(payload) {
+  if (!Array.isArray(payload?.routes)) return [];
+  const options = payload.routes.map(raw => {
+    const summary = raw.summary || {};
+    const seconds = Number(summary.travelDurationInSeconds);
+    const meters = Number(summary.lengthInMeters);
+    // Orbis v3 returns route-level GeoJSON path (or individual leg paths).
+    const path = raw.path?.coordinates || raw.legs?.flatMap(leg => leg.path?.coordinates || []);
+    if (!Array.isArray(path) || path.length < 2 ||
+        path.some(point => !Array.isArray(point) || point.length < 2 ||
+          !Number.isFinite(point[0]) || !Number.isFinite(point[1])) ||
+        !Number.isFinite(seconds) || seconds < 0 ||
+        !Number.isFinite(meters) || meters < 0) return null;
+    const delay = Number(summary.trafficDelayDurationInSeconds);
+    return {
+      coordinates: path.map(point => [point[0], point[1]]),
+      seconds, meters,
+      delay: Number.isFinite(delay) && delay >= 0 ? delay : null,
+      toll: Array.isArray(raw.sections?.toll) && raw.sections.toll.length > 0,
+      arrival: summary.arrivalDateTime || null
+    };
+  }).filter(Boolean);
+  // Do not invent three choices if the backend can only find one or two.
+  return options.sort((a,b) => a.seconds - b.seconds).slice(0,3);
+}
+
+function renderRouteCards() {
+  routeCards.replaceChildren();
+  routeOptions.forEach((route, index) => {
+    const card = document.createElement('button');
+    card.type='button';
+    card.className='route-card';
+    card.classList.toggle('is-selected', index===routeSelected);
+    card.setAttribute('aria-pressed',String(index===routeSelected));
+    const heading = document.createElement('div'); heading.className='route-card-heading';
+    const title = document.createElement('strong');
+    title.textContent = index===0 ? 'Fastest route' : `Alternative ${index+1}`;
+    const eta = document.createElement('b'); eta.textContent=routeDuration(route.seconds);
+    heading.append(title,eta);
+    const detail=document.createElement('div'); detail.className='route-card-details';
+    const detailParts=[routeDistance(route.meters)];
+    if (route.delay !== null) detailParts.push(route.delay >= 30 ? `+${Math.ceil(route.delay/60)} min traffic` : 'No significant traffic delay');
+    else detailParts.push('Traffic estimate included');
+    if (route.toll) detailParts.push('Toll sections');
+    detail.textContent=detailParts.join(' · ');
+    const lower=document.createElement('div'); lower.className='route-card-bottom';
+    lower.textContent = index===routeSelected ? 'Selected · highlighted blue' : 'Tap to preview this route';
+    card.append(heading,detail,lower);
+    card.addEventListener('click',() => selectRoute(index));
+    routeCards.append(card);
+  });
+}
+
+function fitRouteOnMap() {
+  if (!routeOptions.length) return;
+  const bounds = new maplibregl.LngLatBounds();
+  routeOptions[routeSelected].coordinates.forEach(point=>bounds.extend(point));
+  map.fitBounds(bounds,{
+    padding:{top:130,bottom:Math.min(window.innerHeight*.48,420),left:35,right:55},
+    pitch:tilted?35:0,bearing:0,
+    duration:reducedMotion?0:850,maxZoom:15
+  });
+}
+function selectRoute(index) {
+  if (!routeOptions[index]) return;
+  routeSelected=index;
+  syncRouteLayers();
+  renderRouteCards();
+  // Leave room to inspect the selected road while keeping cards scrollable.
+  setSheetPosition('half');
+  fitRouteOnMap();
+}
+
+function describeRouteError(response) {
+  if (response.status===401 || response.status===403)
+    return 'TomTom rejected the key or Routing API access. Check your TomTom products/key permissions.';
+  if (response.status===429) return 'TomTom routing quota reached. Try again later.';
+  if (response.status===400 || response.status===404)
+    return 'No drivable route was found for those points. Try a road nearby or choose a different start.';
+  return `Routing service unavailable (HTTP ${response.status}).`;
+}
+
+async function requestRouteComparison(origin) {
+  if (!chosen?.coords) return;
+  if (!trafficKey) {
+    routePreview.hidden=false;
+    setRouteStatus('Connect your TomTom key in Traffic settings to compare real routes.',true);
+    setSheetPosition('half');
+    return;
+  }
+  const job = ++routeJob;
+  routeAbort?.abort();
+  const controller = new AbortController();
+  routeAbort = controller;
+  routeBusy=true;
+  routePlanButton.disabled=true;
+  routePlanButton.firstChild.textContent='Calculating routes ';
+  routePreview.hidden=false;
+  clearRouteGeometry();
+  routeOrigin={...origin, coords:[...origin.coords]};
+  routeRequestDestinationId=chosen.id;
+  $('routeDestination').textContent=chosen.name;
+  setRouteStatus('Comparing roads using available live traffic and closures…');
+  setSheetPosition('half');
+  if (map.isStyleLoaded()) syncRouteLayers();
+  const timeout=setTimeout(()=>controller.abort(),22000);
+  try {
+    const requestBody={
+      routePlanningLocations:{
+        origin:{type:'Point',coordinates:origin.coords},
+        destination:{type:'Point',coordinates:chosen.coords}
+      },
+      routeType:'fast',travelMode:'car',traffic:'live',
+      departureDateTime:'now',maxPathAlternativeRoutes:2
+    };
+    const response=await fetch(ROUTE_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','TomTom-Api-Key':trafficKey,'Attributes':'routes'},
+      body:JSON.stringify(requestBody),signal:controller.signal,cache:'no-store'
+    });
+    if (!response.ok) throw new Error(describeRouteError(response));
+    const json=await response.json();
+    if (job!==routeJob || routeRequestDestinationId!==chosen?.id) return;
+    const options=normalizeProviderRoutes(json);
+    if (!options.length) throw new Error('No usable driving route was returned. Try a different starting point.');
+    routeOptions=options;
+    routeSelected=0;
+    syncRouteLayers();
+    renderRouteCards();
+    const n=options.length;
+    setRouteStatus(`${n} real route${n===1?'':'s'} found · sorted by traffic-aware ETA, fastest first.`);
+    routePlanButton.firstChild.textContent='Refresh routes ';
+    setSheetPosition('full');
+    requestAnimationFrame(fitRouteOnMap);
+  } catch(error) {
+    if (job!==routeJob) return;
+    const msg = error.name==='AbortError' ? 'Route request timed out. Please retry.' :
+      error instanceof TypeError ? 'Cannot contact routing service. Check connection or browser access.' : error.message;
+    setRouteStatus(msg || 'Route comparison failed.',true);
+    setSheetPosition('half');
+  } finally {
+    clearTimeout(timeout);
+    if (job===routeJob) {
+      routeBusy=false; routeAbort=null; routePlanButton.disabled=false;
+      if (!routeOptions.length) routePlanButton.firstChild.textContent='Compare driving routes ';
+    }
+  }
+}
+
+function prepareComparison() {
+  if (!chosen || routeBusy) return;
+  routePreview.hidden=false;
+  $('routeDestination').textContent=chosen.name;
+  if (!trafficKey) {
+    setRouteStatus('Open Traffic settings and connect a TomTom key with Routing API access.',true);
+    setSheetPosition('half'); return;
+  }
+  if (routeOrigin?.kind === 'map') {
+    void requestRouteComparison(routeOrigin);
+    return;
+  }
+  if (!navigator.geolocation) {
+    setRouteStatus('GPS is unavailable. Tap “Choose start on map” below.',true);
+    setSheetPosition('half'); return;
+  }
+  setRouteStatus('Finding your current location…');
+  setSheetPosition('half');
+  const requestedDestinationId = chosen.id;
+  const currentJob = routeJob;
+  navigator.geolocation.getCurrentPosition(position=>{
+    if (routeJob !== currentJob || chosen?.id !== requestedDestinationId) return;
+    const origin={coords:[position.coords.longitude,position.coords.latitude],label:'Current location',kind:'gps'};
+    showUserLocation(origin.coords);
+    void requestRouteComparison(origin);
+  },()=>{
+    if (routeJob !== currentJob || chosen?.id !== requestedDestinationId) return;
+    setRouteStatus('GPS location unavailable. Tap “Choose start on map” below.',true);
+    setSheetPosition('half');
+  },{enableHighAccuracy:true,timeout:14000,maximumAge:10000});
+}
+
+routePlanButton.addEventListener('click',prepareComparison);
+$('routePickOrigin').addEventListener('click',()=>{
+  if (!chosen || routeBusy) return;
+  routePickMode=true;
+  $('routePickBanner').hidden=false;
+  map.getCanvas().style.cursor='crosshair';
+  setSheetPosition('peek');
+  toast('Tap a road on the map to choose the start');
+});
+$('routePickCancel').addEventListener('click',()=>{
+  endRoutePick();setSheetPosition('half');
+});
+map.on('click',event=>{
+  if (!routePickMode) return;
+  const coords=[event.lngLat.lng,event.lngLat.lat];
+  endRoutePick();
+  if (!Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) return;
+  const origin={coords,label:'Picked on map',kind:'map'};
+  routeOrigin=origin;
+  void requestRouteComparison(origin);
+});
+$('routeClose').addEventListener('click',()=>{
+  cancelRouteRequest();endRoutePick();clearRouteGeometry();
+  routeOrigin=null;routePreview.hidden=true;
+  if (map.getSource(ROUTE_START_SOURCE)) map.getSource(ROUTE_START_SOURCE).setData(routeStartGeojson());
+  setSheetPosition('peek');
+});
+// The traffic key is already stored only in this device. Do not embed it in code.
+// New style (light/dark) is already handled by syncRouteLayers above.
+resetRouteComparison();

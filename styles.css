@@ -431,3 +431,56 @@ body.dark .search-modal .modal-footnote a {color:#8dcaff;}
 html, body, .app { touch-action: manipulation; }
 .app button, .app a, .app input, .app select, .app textarea,
 .app [role="button"] { touch-action: manipulation; }
+
+
+/* MyArah Route Suggestions: appended to the existing UI, no redesign. */
+.route-plan[hidden],.route-preview[hidden],.route-pick-banner[hidden] {display:none!important}
+.route-plan {
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  width:100%;min-height:45px;margin-top:10px;padding:0 14px;
+  border:0;border-radius:14px;background:#277dc0;color:#fff;
+  font-size:13px;font-weight:730;text-align:left;letter-spacing:-.015em;
+}
+.route-plan span{font-size:19px;font-weight:400}
+.route-plan:disabled{opacity:.62}
+.route-preview {margin-top:18px;padding:15px 0 10px;border-top:1px solid #e8edf0}
+.route-preview-header {display:flex;align-items:center;justify-content:space-between;gap:10px}
+.route-preview-header span {color:#8495a4;font-size:10px;font-weight:780;letter-spacing:.1em}
+.route-preview-header button {border:0;background:transparent;color:#267bbb;padding:5px 0;font-size:12px;font-weight:700}
+.route-destination {margin:8px 0 2px;font-size:18px;font-weight:750;letter-spacing:-.035em;overflow-wrap:anywhere}
+.route-status {font-size:12px;line-height:1.5;color:#7c8c9a;margin:9px 0 12px}
+.route-status.is-error {color:#b34545}
+.route-cards {display:grid;gap:9px}
+.route-card {
+  display:block;width:100%;padding:13px 14px;text-align:left;
+  border:1px solid #e2e9ed;border-radius:15px;background:#f7f9fa;color:#2d3f51;
+  transition:border-color 180ms ease,background-color 180ms ease,transform 180ms ease;
+}
+.route-card:active {transform:scale(.99)}
+.route-card.is-selected{background:#edf6ff;border-color:#87bae4;box-shadow:inset 3px 0 0 #2684d0}
+.route-card-heading {display:flex;align-items:center;justify-content:space-between;gap:8px}
+.route-card-heading strong {font-size:14px;font-weight:760;letter-spacing:-.02em}
+.route-card-heading b {font-size:19px;font-weight:770;font-variant-numeric:tabular-nums;white-space:nowrap}
+.route-card-details{font-size:11px;line-height:1.55;color:#748697;margin-top:5px}
+.route-card-bottom {font-size:10px;font-weight:650;color:#2c7cb8;margin-top:8px}
+.route-pick-origin{width:100%;border:1px solid #cbdbe7;color:#2b7db8;background:transparent;border-radius:12px;margin-top:12px;padding:12px 8px;font-weight:700;font-size:12px}
+.route-disclaimer{font-size:10px;line-height:1.5;color:#8a9baa;margin:12px 2px 0}
+.route-pick-banner {
+  position:absolute;top:calc(env(safe-area-inset-top,0px) + 80px);
+  z-index:9;left:16px;right:16px;border-radius:15px;padding:11px 13px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  font-size:12px;font-weight:650;color:#2f4c61;
+}
+.route-pick-banner button {border:0;border-radius:9px;padding:8px 11px;background:#eaf3fb;color:#247cbd;font-size:12px;font-weight:750}
+body.dark .route-preview {border-top-color:#394858}
+body.dark .route-destination {color:#e9f2f8}
+body.dark .route-status {color:#b7c6d3}
+body.dark .route-status.is-error {color:#ffb0a6}
+body.dark .route-card {background:#293747;border-color:#3d5263;color:#e9f2f8}
+body.dark .route-card.is-selected {background:#263f55;border-color:#5b9bd0}
+body.dark .route-card-details,body.dark .route-disclaimer {color:#b6c5d2}
+body.dark .route-pick-origin {border-color:#54738b;color:#9ad6ff}
+body.dark .route-pick-banner {color:#dfeaf3}
+body.dark .route-pick-banner button {background:#294c66;color:#b4deff}
+@media(min-width:700px) {.route-pick-banner {max-width:460px;left:22px;right:auto}}
+@media(prefers-reduced-motion:reduce) {.route-card {transition:none}}

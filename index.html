@@ -11,8 +11,8 @@
   <title>MyArah — Explore Malaysia</title>
   <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=destinationpin-2">
-  <script type="module" src="app.js?v=destinationpin-2"></script>
+  <link rel="stylesheet" href="styles.css?v=myarah-routes-1">
+  <script type="module" src="app.js?v=myarah-routes-1"></script>
 </head>
 <body>
   <main class="app" aria-label="MyArah map">
@@ -39,6 +39,7 @@
       <div class="traffic-legend-top"><span class="traffic-live-dot" aria-hidden="true"></span><span id="trafficLiveLabel">Traffic on</span><button id="trafficSettings" type="button" aria-label="Traffic settings" title="Traffic settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.9v2M12 19.1v2M4.3 4.3l1.5 1.5M18.2 18.2l1.5 1.5M2.9 12h2M19.1 12h2M4.3 19.7l1.5-1.5M18.2 5.8l1.5-1.5"/></svg></button></div>
       <div class="traffic-legend-colors"><span><i class="traffic-swatch clear"></i>Clear</span><span><i class="traffic-swatch slow"></i>Slow</span><span><i class="traffic-swatch jam"></i>Jam</span></div>
     </aside>
+    <div id="routePickBanner" class="route-pick-banner surface" hidden role="status">Tap the map to choose a starting point <button id="routePickCancel" type="button">Cancel</button></div>
     <section id="bottomSheet" class="sheet surface" data-sheet-state="peek" aria-label="Explore destinations">
       <div id="sheetDragArea" class="sheet-drag-area">
         <button id="sheetGrabber" class="sheet-grabber" type="button" aria-label="Expand destinations panel" aria-expanded="false" aria-controls="sheetScroll">
@@ -48,7 +49,16 @@
       </div>
       <div id="sheetScroll" class="sheet-scroll" tabindex="0" aria-label="Destination options">
         <button id="browse" class="destination-button"><span class="dest-circle"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.4"/></svg></span><span class="dest-content"><strong>Find a destination</strong><small>Places, addresses and postcodes</small></span><span class="chevron">›</span></button>
+        <button id="routePlan" class="route-plan" type="button" hidden>Compare driving routes <span aria-hidden="true">→</span></button>
         <div id="sheetExtras" class="sheet-extras" inert aria-hidden="true">
+          <section id="routePreview" class="route-preview" aria-label="Driving route suggestions" hidden>
+            <div class="route-preview-header"><span>DRIVING ROUTES</span><button id="routeClose" type="button" aria-label="Hide routes">Clear</button></div>
+            <p id="routeDestination" class="route-destination"></p>
+            <p id="routeStatus" class="route-status" role="status" aria-live="polite">Choose a starting point.</p>
+            <div id="routeCards" class="route-cards" role="group" aria-label="Suggested routes"></div>
+            <button id="routePickOrigin" type="button" class="route-pick-origin">Choose start on map</button>
+            <p class="route-disclaimer">Travel times are estimates from TomTom live and historical traffic where available. Road conditions may change. No turn-by-turn guidance yet.</p>
+          </section>
           <div id="recentSection" class="recent-section" hidden>
             <div class="section-caption">RECENT PLACES</div>
             <div id="recentPlaces" class="chips" aria-label="Recently searched places"></div>
