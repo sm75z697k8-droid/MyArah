@@ -247,3 +247,11 @@ compass, or bottom-sheet design.
 - The map and other features are unchanged.
 - **Diagnostics:** If a gap is still visible, open the website with `?viewportDebug=1` appended to its GitHub Pages URL (or `&viewportDebug=1` if it already has query parameters). The small panel displays iOS viewport measurements—take one screenshot before opening the keyboard and another after closing it, and share them. Tap the panel to minimize it. It does not display your location or API key.
 - **iOS limitation:** In some Home Screen PWA versions, WebKit reserves a strip *outside* the webpage's viewport. CSS/JS cannot draw into that strip. Refer to https://bugs.webkit.org/show_bug.cgi?id=301994 (reopened in 2026). A fixed frame cannot override OS-owned letterboxing.
+
+## Map control visibility update
+- Improved contrast for **Location**, **2D/3D** and the 16-point **Compass** in both appearance modes.
+- Retained the circular liquid-glass aesthetic, map rotation behavior and existing alignment.
+- Stronger compass tick marks, central direction label and red north marker.
+- Traffic button remains intentionally unchanged.
+- Supports iOS **Increase Contrast** (`prefers-contrast: more`), where supported.
+- Only `styles.css`, `index.html` (stylesheet cache version), and this README were changed. `app.js` is identical to the uploaded version.

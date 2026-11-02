@@ -712,3 +712,129 @@ html, body { overscroll-behavior: none; }
   box-shadow: 0 4px 16px rgba(0,0,0,.20);
 }
 #myarahViewportDebug.is-minimized {max-width: 38px; max-height: 26px; overflow: hidden;}
+
+
+/* === MyArah UI legibility pass: readable liquid-glass map controls ===
+   High-contrast icon and dial foregrounds are deliberate, not transparent.
+   Scope: location, 2D/3D, compass. Traffic styling is unchanged. */
+.map-controls .primary-control,
+.map-controls .text-control,
+#north.compass-control {
+  border: 1.5px solid rgba(255, 255, 255, .96);
+  background: linear-gradient(155deg,
+    rgba(255, 255, 255, .92) 0%,
+    rgba(242, 247, 253, .86) 55%,
+    rgba(220, 233, 247, .79) 100%);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  backdrop-filter: blur(22px) saturate(1.45);
+  box-shadow:
+    0 8px 22px rgba(20, 38, 57, .21),
+    0 1px 3px rgba(13, 33, 56, .13),
+    inset 0 1.5px 0 rgba(255, 255, 255, .94),
+    inset 0 -1px 0 rgba(58, 84, 110, .16);
+}
+
+/* Less washed-out: blue GPS arrow, with strong edges and the familiar tilt. */
+.map-controls .primary-control { color: #1265b3; }
+.map-controls .primary-control svg {
+  width: 26px;
+  height: 26px;
+  stroke-width: 2.6;
+  filter: drop-shadow(0 1px 0 rgba(255,255,255,.65));
+}
+.map-controls .primary-control svg path { fill: rgba(39, 126, 217, .08); }
+
+/* Match the arrow's clarity in the 2D/3D control. */
+.map-controls .text-control {
+  color: #273c56;
+  font-size: 15px;
+  font-weight: 850;
+  letter-spacing: -.03em;
+}
+.map-controls .text-control.is-active {
+  color: #0d5f9e;
+  border-color: rgba(80, 143, 194, .70);
+  background: linear-gradient(160deg, rgba(236,247,255,.98),rgba(194,223,246,.90));
+}
+
+/* Compass is readable even against a pale map underneath the glass. */
+#north .compass-dial {
+  background: radial-gradient(circle at 33% 25%,
+    rgba(255,255,255,.72),
+    rgba(224,237,249,.48) 62%,
+    rgba(183,205,226,.33));
+  box-shadow: inset 0 0 0 1px rgba(39, 67, 97, .18);
+}
+#north .compass-ring { stroke: rgba(53, 77, 103, .37); }
+#north .compass-tick {
+  stroke: rgba(61, 82, 109, .86);
+  stroke-width: 2.55;
+}
+#north .compass-tick-major {
+  stroke: #354d68;
+  stroke-width: 3.15;
+}
+#north .compass-cardinal {
+  color: #233752;
+  font-size: 17px;
+  font-weight: 850;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .72);
+}
+#north .compass-tip {
+  fill: #d93839;
+  filter: drop-shadow(0 1px 1px rgba(83, 23, 23, .18));
+}
+
+/* Night mode: dark frosted glass, bright icons, ticks and center label. */
+body.dark .map-controls .primary-control,
+body.dark .map-controls .text-control,
+body.dark #north.compass-control {
+  border-color: rgba(177, 203, 230, .45);
+  background: linear-gradient(155deg,
+    rgba(54, 73, 98, .92) 0%,
+    rgba(34, 51, 73, .88) 57%,
+    rgba(18, 33, 52, .85) 100%);
+  box-shadow:
+    0 9px 25px rgba(2, 9, 17, .45),
+    inset 0 1px 0 rgba(255, 255, 255, .23),
+    inset 0 -1px 0 rgba(0, 0, 0, .24);
+}
+body.dark .map-controls .primary-control { color: #8bc5ff; }
+body.dark .map-controls .primary-control svg {
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.26));
+}
+body.dark .map-controls .primary-control svg path { fill: rgba(111, 186, 255, .09); }
+body.dark .map-controls .text-control { color: #f2f7ff; }
+body.dark .map-controls .text-control.is-active {
+  color: #a9ddff;
+  border-color: rgba(114, 184, 236, .72);
+  background: linear-gradient(160deg, rgba(35, 78, 111, .94), rgba(24, 56, 85, .90));
+}
+body.dark #north .compass-dial {
+  background: radial-gradient(circle at 32% 25%,
+    rgba(98, 121, 150, .46),
+    rgba(36, 56, 80, .40) 65%,
+    rgba(15, 28, 45, .39));
+  box-shadow: inset 0 0 0 1px rgba(203, 225, 247, .17);
+}
+body.dark #north .compass-ring { stroke: rgba(218, 234, 250, .24); }
+body.dark #north .compass-tick { stroke: rgba(212, 228, 244, .75); }
+body.dark #north .compass-tick-major { stroke: #eff7ff; }
+body.dark #north .compass-cardinal {
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .55);
+}
+body.dark #north .compass-tip {
+  fill: #ff7773;
+  filter: drop-shadow(0 1px 1px rgba(20, 3, 8, .55));
+}
+
+/* Higher-contrast preference: increase opacity while retaining a glass edge. */
+@media (prefers-contrast: more) {
+  .map-controls .primary-control,
+  .map-controls .text-control,
+  #north.compass-control { background: rgba(246,250,255,.97); border-color: #607b95; }
+  body.dark .map-controls .primary-control,
+  body.dark .map-controls .text-control,
+  body.dark #north.compass-control { background: rgba(22,37,57,.97); border-color: #b2cadf; }
+}
