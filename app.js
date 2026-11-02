@@ -602,9 +602,9 @@ const trafficMessage = $('trafficMessage');
 const trafficConnect = $('trafficConnect');
 
 function trafficTileUrl(key = trafficKey, night = dark) {
-  // TomTom Orbis Maps Traffic API, raster flow tile, v2, 256 px.
+  // TomTom Orbis Maps Traffic API v2: request 512-pixel (2x) images for sharp iPhone rendering.
   const style = night ? 'dark' : 'light';
-  return `https://api.tomtom.com/maps/orbis/traffic/flow/raster/tile/{z}/{x}/{y}?apiVersion=2&key=${encodeURIComponent(key)}&style=${style}&tileSize=256`;
+  return `https://api.tomtom.com/maps/orbis/traffic/flow/raster/tile/{z}/{x}/{y}?apiVersion=2&key=${encodeURIComponent(key)}&style=${style}&tileSize=512`;
 }
 
 function trafficCheckUrl(key) {
@@ -638,6 +638,9 @@ function installTrafficLayer() {
     map.addSource(TRAFFIC_SOURCE, {
       type: 'raster',
       tiles: [trafficTileUrl()],
+      // The 256 here is the LOGICAL map tile width, not image resolution.
+      // TomTom returns a 512px image for this same z/x/y grid tile (2x retina).
+      // Keeping 256 preserves road alignment and the previous tile zoom behavior.
       tileSize: 256,
       minzoom: 0,
       maxzoom: 22,

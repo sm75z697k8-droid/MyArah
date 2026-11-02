@@ -423,3 +423,11 @@ body.dark .search-modal .modal-footnote a {color:#8dcaff;}
 @media (prefers-reduced-motion:reduce) {
   .search-submit {transition:none;}
 }
+
+
+/* === MyArah touch polish: prevent Safari double-tap zoom on UI buttons. ===
+   Keep pinch-to-zoom accessible. Don't use user-scalable=no or maximum-scale=1.
+   MapLibre's own canvas/map gestures and the sheet's touch-action rules remain. */
+html, body, .app { touch-action: manipulation; }
+.app button, .app a, .app input, .app select, .app textarea,
+.app [role="button"] { touch-action: manipulation; }

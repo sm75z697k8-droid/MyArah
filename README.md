@@ -121,3 +121,43 @@ This update does **not** test, validate, or use up quota from your specific supp
 
 Official policy: https://operations.osmfoundation.org/policies/nominatim/
 API documentation: https://nominatim.org/release-docs/latest/api/Search/
+
+
+## Update — sharper TomTom traffic and no accidental page zoom
+
+This is a targeted update to the uploaded **MyArah Real Search** project.
+The real Malaysia search, recent places, heading cone, 2D/3D mode, draggable sheet,
+light/dark theme and TomTom login/storage behavior are unchanged.
+
+### 512 × 512 traffic tiles
+- TomTom Orbis v2 flow raster tile requests now use **`tileSize=512`** (instead of `256`).
+- The MapLibre raster source keeps **`tileSize: 256` intentionally**: that property is
+  the *logical map-grid tile size*, not the downloaded image's pixel dimensions.
+  A 512-pixel image of the same tile is rendered at the original 256 CSS-pixel
+  grid size for sharper output on high-density iPhone screens, without changing
+  road alignment or the map's zoom-level selection.
+- No new API key or traffic provider is needed. Traffic remains an optional live overlay.
+- 512-pixel images use more bandwidth, and visible sharpness depends on source data.
+- This update doesn't replace raster traffic with vector lines.
+
+### Stop Safari webpage double-tap zoom on UI controls
+- Use **`touch-action: manipulation`** for the app and interactive controls.
+  Rapidly tapping a GPS, compass, traffic, 2D/3D, or theme button should not
+  zoom the **webpage** in iOS Safari.
+- Normal **map panning and pinch zoom** remain enabled. The map engine can
+  still zoom the **map** if you double-tap on the map canvas: that is separate.
+- Page pinch zoom for accessibility is not disabled (`user-scalable=no` is not used).
+- On older/unsupported iOS versions, some browser-specific zoom gestures may
+  still be outside the webpage's control.
+
+### Publish from iPhone / GitHub Pages
+1. In your existing repository, replace `index.html`, `styles.css`,
+   `app.js`, and `README.md` with the files in this ZIP.
+2. Commit; reload MyArah after GitHub Pages finishes deploying.
+3. Turn traffic off and on if its old tiles remain cached.
+
+The version suffixes on the CSS/JS links in `index.html` help Safari fetch
+the updated assets instead of previously cached copies. No build or installation is needed.
+
+References: TomTom Raster Flow Tiles (Orbis v2), MapLibre raster source tileSize
+specification, WebKit `touch-action: manipulation`.
