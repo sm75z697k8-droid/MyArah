@@ -362,7 +362,7 @@ $('tilt').addEventListener('click',()=>{
   $('tilt').setAttribute('aria-label',tilted?'Switch to 2D map':'Switch to 3D map');
   toast(tilted?'3D mode · buildings where available':'2D map');
 });
-$('north').addEventListener('click',()=>map.easeTo({bearing:0,duration:reducedMotion?0:520,easing:cameraEase}));
+// Compass button behavior is managed by the cardinal dial module below.
 // iPhone-style facing-direction cone. This uses a real compass reading when
 // allowed, not a randomly rotating graphic or an assumed travel direction.
 // The direction is screen-relative, so map rotation is deducted from heading.
@@ -412,6 +412,7 @@ function handleCompassOrientation(event) {
   compassHeading = compassHeading === null ? incoming :
     normalizedHeading(compassHeading + smallestAngle(incoming - compassHeading) * 0.28);
   drawFacingDirection();
+  updateCompassDial();
 }
 
 function enableFacingDirection() {
@@ -1223,3 +1224,51 @@ $('routeClose').addEventListener('click',()=>{
 // The traffic key is already stored only in this device. Do not embed it in code.
 // New style (light/dark) is already handled by syncRouteLayers above.
 resetRouteComparison();
+
+
+// Reuse the compass permission and heading already implemented for the GPS cone.
+function getLiveCompassHeading() { return compassHeading; }
+function enableCompassForDial() { return enableFacingDirection(); }
+
+// MyArah live cardinal compass. If sensor heading is not available, this shows
+// MAP orientation instead of falsely claiming the phone faces that direction.
+let shownCompassRotation = null;
+const compassButton = $('north');
+const compassRoseElement = $('compassRose');
+const compassCardinalElement = $('compassCardinal');
+const compassSourceElement = $('compassSource');
+const compassNorm = angle => (angle % 360 + 360) % 360;
+const compassDelta = angle => ((angle + 540) % 360) - 180;
+const compassWords = ['North', 'North-east', 'East', 'South-east', 'South', 'South-west', 'West', 'North-west'];
+const compassShort = ['N','NE','E','SE','S','SW','W','NW'];
+function updateCompassDial() {
+  const sensor = getLiveCompassHeading();
+  const facing = Number.isFinite(sensor);
+  const angle = compassNorm(facing ? sensor : map.getBearing());
+  const idx = Math.round(angle / 45) % 8;
+  const target = -angle;
+  shownCompassRotation = shownCompassRotation === null ? target :
+    shownCompassRotation + compassDelta(target - shownCompassRotation);
+  compassRoseElement.style.transform = `rotate(${shownCompassRotation}deg)`;
+  compassCardinalElement.textContent = compassShort[idx];
+  compassSourceElement.textContent = facing ? 'FACING' : 'MAP';
+  compassButton.classList.toggle('is-facing', facing);
+  compassButton.setAttribute('aria-pressed', String(facing));
+  compassButton.setAttribute('aria-label',
+    `${facing ? 'Phone facing' : 'Map points'} ${compassWords[idx]}, ${Math.round(angle)} degrees. ` +
+    (facing ? 'Tap to reset map north.' : 'Tap to enable phone compass and reset map north.'));
+}
+// Rotating the map updates the dial in MAP mode, without pretending it is GPS direction.
+map.on('rotate', updateCompassDial);
+compassButton.addEventListener('click', () => {
+  // Invoke the permission request immediately within the tap on iOS.
+  const permission = enableCompassForDial();
+  map.easeTo({bearing:0, duration:reducedMotion?0:520, easing:cameraEase});
+  Promise.resolve(permission).then(allowed => {
+    updateCompassDial();
+    if (!allowed) toast('Phone compass unavailable — showing map orientation');
+    else if (!Number.isFinite(getLiveCompassHeading()))
+      toast('Compass enabled. Rotate your iPhone to read your facing direction.');
+  });
+});
+updateCompassDial();

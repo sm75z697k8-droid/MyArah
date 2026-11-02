@@ -186,3 +186,14 @@ After searching for and selecting a destination, press **Compare driving routes*
 - Keep all four files together in your repository root. `index.html` contains a versioned `app.js` and `styles.css` reference to avoid stale iPhone caching.
 
 This update only modifies the route comparison UI, the map route layers, and related code. Existing search, traffic visualization, GPS direction cone, 2D/3D buildings, and bottom-sheet gestures are retained.
+
+
+## Live compass dial (new in this update)
+
+- The former arrow-shaped north reset button is now a circular, smoothly rotating compass with a red north indicator and **N / NE / E / SE / S / SW / W / NW** in the centre.
+- **MAP** below the dial means it is showing which compass direction is at the TOP of the map, based on map rotation. This is **not** the direction you are facing.
+- Tap the compass to enable iPhone motion & orientation permission. When the iPhone supplies a reliable heading, the label changes to **FACING**. The dial then shows the direction in which the *top edge of your phone points*, useful while walking and holding the phone upright. Tapping also resets the map to north-up.
+- Motion/compass access requires a supported device, HTTPS (such as GitHub Pages), and permission. When denied/unavailable, the display remains in **MAP** mode and never fabricates facing direction.
+- In the feature-complete version, the existing GPS location cone and its compass permission logic are reused; no duplicate sensors are registered.
+- Magnetic compass readings can be inaccurate near cars, magnets, and metal. This is not lane-level positioning or a dedicated walking navigation system.
+- Styling is original and inspired by familiar circular navigation dials rather than copying Apple artwork.

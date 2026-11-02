@@ -484,3 +484,49 @@ body.dark .route-pick-banner {color:#dfeaf3}
 body.dark .route-pick-banner button {background:#294c66;color:#b4deff}
 @media(min-width:700px) {.route-pick-banner {max-width:460px;left:22px;right:auto}}
 @media(prefers-reduced-motion:reduce) {.route-card {transition:none}}
+
+
+/* Live compass: a restrained, rotating cardinal dial. All other UI is unchanged. */
+#north.compass-control {
+  width: 57px; height: 66px; padding: 4px 4px 3px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; background: rgba(43,58,77,.97); border: 1px solid rgba(235,244,251,.22);
+  border-radius: 17px; color: #f4f8fd;
+  box-shadow: 0 3px 14px rgba(26,38,50,.20);
+  touch-action: manipulation;
+}
+#north .compass-dial {
+  display: grid; place-items: center; position: relative;
+  width: 45px; height: 45px; flex: none; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #63758b, #344457 76%);
+  border: 1px solid rgba(246,250,255,.30);
+  box-shadow: inset 0 0 0 1px rgba(12,23,37,.14);
+  overflow: hidden;
+}
+#north .compass-rose {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  transform-origin: center; will-change: transform;
+  transition: transform 210ms ease-out;
+}
+#north .compass-tick,
+#north .compass-tick-major {
+  fill: none; stroke: rgba(228,238,248,.62); stroke-width: 2.7; stroke-linecap: round;
+}
+#north .compass-tick-major { stroke: #e7f0f9; stroke-width: 3.2; }
+#north .compass-tip { fill: #f35b5d; stroke: none; }
+#north .compass-cardinal {
+  position: relative; z-index: 1; font-size: 19px; font-weight: 780;
+  letter-spacing: -.05em; line-height: 1; color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,.18);
+}
+#north .compass-source {
+  font-size: 8px; line-height: 10px; font-weight: 780;
+  letter-spacing: .09em; color: #cedbe7;
+}
+#north.is-facing { background: rgba(30,61,87,.97); }
+#north.is-facing .compass-source { color: #9fdef6; }
+body.dark #north.compass-control { background: rgba(38,52,69,.97); border-color: #687789; }
+#north:focus-visible { outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  #north .compass-rose { transition: none; }
+}
