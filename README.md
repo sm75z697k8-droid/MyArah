@@ -204,3 +204,10 @@ This update only modifies the route comparison UI, the map route layers, and rel
 - The control is redesigned as a circular liquid-glass compass, inspired by Apple-style map UI without copying Apple assets.
 - It uses a **16-point dial** (N, NNE, NE, ENE, E, ESE, SE, SSE, S, SSW, SW, WSW, W, WNW, NW, NNW).
 - The red north indicator rotates around the dial as the map rotates, and tapping the compass resets the map to north-up.
+
+
+## Control icon refinement
+- The **location** and **3D** controls are now aligned with the compass in a consistent circular layout.
+- Those controls use a **liquid-glass** treatment to better match the compass and the premium map UI.
+- The **location arrow** is slightly rotated and given a soft teal-blue glow, inspired by Apple-style walking/location controls.
+- The **traffic control** is intentionally left in its previous style for now, as requested.
