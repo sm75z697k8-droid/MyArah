@@ -516,3 +516,7 @@ material is not exposed to GitHub Pages / ordinary web apps.
 - Large GPS corrections no longer animate the matched arrow in a straight line across corners; they snap to the actual polyline, then resume normal along-route smoothing.
 - Removed extra CSS rotation lag during bends. Off-route detection, traffic, map styles, search, screen wake, glass effect and navigation controls remain unchanged.
 - For performance comparison, `?glass=off` still disables experimental refraction.
+
+
+## Landscape speedometer alignment
+Aligned the left edge of the speedometer with the existing trip-summary glass pill on notched iPhones, including when experimental optical glass is enabled. Portrait layout, speed reading, and navigation logic are unchanged.

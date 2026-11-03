@@ -2019,3 +2019,14 @@ body[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
    CSS rotation tween caused the arrow to face an older angle at bends. */
 .myarah-navigation-arrow {transition:opacity 160ms ease;}
 @media (prefers-reduced-motion:reduce){.myarah-navigation-arrow{transition:none;}}
+
+/* Landscape alignment: use the same safe-area left anchor as the trip card.
+   The earlier max(13px, safe-area) dropped the card's 13px inset on notched iPhones. */
+@media (orientation:landscape) and (max-height:560px) {
+  #navSpeed.nav-speed-gauge,
+  body[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
+    position:absolute;
+    left:calc(env(safe-area-inset-left) + 13px);
+    right:auto;
+  }
+}
