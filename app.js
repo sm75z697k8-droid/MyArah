@@ -1671,13 +1671,53 @@ function guidanceLabel(maneuver){
     passTollgate:'Approaching tollgate'};
   return names[maneuver] || 'Follow the route';
 }
-function guidanceIcon(code){
-  if (/arrive|waypoint/i.test(code)) return '●';
-  if (/roundabout/i.test(code)) return '⟳';
-  if (/Uturn|Back/i.test(code)) return '↶';
-  if (/left/i.test(code)) return '↰';
-  if (/right/i.test(code)) return '↱';
-  return '↑';
+// Navigation maneuver SVGs: Lucide Icons (ISC license, license in README).
+// These shapes are embedded so icons never require a network request.
+// Only static, locally defined SVG data is ever inserted into these elements.
+const NAV_MANEUVER_SVG = Object.freeze({
+  straight:'<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>',
+  route:'<circle cx="6" cy="19" r="2"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="17" cy="5" r="2"/>',
+  left:'<polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>',
+  right:'<polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/>',
+  slightLeft:'<path d="m17 17-10-10"/><path d="M7 15V7h8"/>',
+  slightRight:'<path d="m7 17 10-10"/><path d="M9 7h8v8"/>',
+  uturn:'<path d="M12 21V9a5 5 0 0 0-10 0v3"/><path d="m2 8 0 4 4 0"/>',
+  roundabout:'<path d="M20.8 10A9 9 0 1 0 21 12"/><path d="m16 10 5 0 0-5"/>',
+  destination:'<path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/>',
+  mergeLeft:'<path d="M7 4v3a8 8 0 0 0 8 8h2"/><path d="m13 11 4 4-4 4"/><path d="M17 4v7"/>',
+  mergeRight:'<path d="M17 4v3a8 8 0 0 1-8 8H7"/><path d="m11 11-4 4 4 4"/><path d="M7 4v7"/>'
+});
+function navManeuverIconName(code){
+  const value=String(code||'').toLowerCase();
+  if(value==='proceed')return 'route';
+  if(/arrive|waypoint|destination/.test(value))return 'destination';
+  if(/roundabout/.test(value))return 'roundabout';
+  if(/uturn|u-turn|back/.test(value))return 'uturn';
+  if(/merge/.test(value) && /left/.test(value))return 'mergeLeft';
+  if(/merge/.test(value) && /right/.test(value))return 'mergeRight';
+  if(/slight/.test(value) && /left/.test(value))return 'slightLeft';
+  if(/slight/.test(value) && /right/.test(value))return 'slightRight';
+  if(/left/.test(value))return 'left';
+  if(/right/.test(value))return 'right';
+  return 'straight';
+}
+function showNavManeuverIcon(elementId,maneuver){
+  const element=$(elementId);
+  if(!element)return;
+  const name=navManeuverIconName(maneuver);
+  if(element.dataset.navManeuver===name && element.firstElementChild?.tagName?.toLowerCase()==='svg')return;
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 24 24');
+  svg.setAttribute('fill','none');
+  svg.setAttribute('stroke','currentColor');
+  svg.setAttribute('stroke-width','2.5');
+  svg.setAttribute('stroke-linecap','round');
+  svg.setAttribute('stroke-linejoin','round');
+  svg.setAttribute('focusable','false');
+  svg.setAttribute('aria-hidden','true');
+  svg.innerHTML=NAV_MANEUVER_SVG[name];
+  element.replaceChildren(svg);
+  element.dataset.navManeuver=name;
 }
 function navDistance(m){
   if (!Number.isFinite(m)) return '—';
@@ -2102,7 +2142,7 @@ function updateNavAlert(text){
 // The existing maneuver card is reused for a car park or uncertain road entry.
 // Do not announce a turn while the GPS has not confidently joined the route.
 function showProceedToRoute(distance){
-  $('navTurnSymbol').textContent='↑';
+  showNavManeuverIcon('navTurnSymbol','proceed');
   $('navTurnDistance').textContent=Number.isFinite(distance) ?
     `${navDistance(Math.max(0,distance))} from route` : 'Join the route';
   $('navTurnText').textContent='Proceed to the route';
@@ -2170,7 +2210,7 @@ function refreshSecondaryNavigationTurn(route,current,distanceToCurrent){
   }
   const spanAfter=Math.max(0,following.offset-current.offset);
   const relativeText=spanAfter<35 ? 'right after' : `in ${navDistance(spanAfter)}`;
-  $('navNextTurnSymbol').textContent=guidanceIcon(following.maneuver);
+  showNavManeuverIcon('navNextTurnSymbol',following.maneuver);
   $('navNextTurnText').textContent=following.message || guidanceLabel(following.maneuver);
   $('navNextTurnDistance').textContent=relativeText;
   row.hidden=false;
@@ -2183,7 +2223,7 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
     // A provider can return an invalid origin/waypoint arrival without any
     // usable maneuver. Keep safe generic guidance instead of stale text.
     navigation.turnIndex=-1;
-    $('navTurnSymbol').textContent='↑';
+    showNavManeuverIcon('navTurnSymbol','continueStraight');
     $('navTurnDistance').textContent=navDistance(Math.max(0,(Number(route.meters)||0)-progress));
     $('navTurnText').textContent='Continue along the route';
     const following=$('navNextTurn');if(following)following.hidden=true;
@@ -2208,13 +2248,13 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
   if(arrival){
     const side=/right/i.test(next.maneuver+' '+next.message)?'right':
       /left/i.test(next.maneuver+' '+next.message)?'left':null;
-    $('navTurnSymbol').textContent='●';
+    showNavManeuverIcon('navTurnSymbol','arrive');
     $('navTurnDistance').textContent=navDistance(remaining>0?remaining:distance);
     $('navTurnText').textContent=remaining>180 ? 'Continue towards your destination' :
       side ? `Destination ahead on the ${side}` : 'Approaching your destination';
     const later=$('navNextTurn');if(later)later.hidden=true;
   }else{
-    $('navTurnSymbol').textContent=guidanceIcon(next.maneuver);
+    showNavManeuverIcon('navTurnSymbol',next.maneuver);
     $('navTurnDistance').textContent=navDistance(distance);
     $('navTurnText').textContent=next.message || guidanceLabel(next.maneuver);
     refreshSecondaryNavigationTurn(route,next,distance);

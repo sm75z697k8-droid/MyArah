@@ -442,3 +442,21 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+## Maneuver icon refinement (2026-11-03)
+- The large guidance arrow and the smaller **Then** arrow now use real inline SVGs, rather than platform-dependent Unicode symbols.
+- SVGs adapt to route instructions: straight, left/right, slight turns, U-turns, roundabouts, merging and destination.
+- **Proceed to the route** displays a dedicated winding-route icon rather than an ordinary turn arrow.
+- Slightly improved next-turn contrast with a soft blue icon tile in both light and dark mode; layout and controls otherwise unchanged.
+- Fixed a pre-existing CSS issue: **Then** now really hides when there is no next instruction or while showing **Proceed to the route**.
+- The turn/route calculation, arrival filtering, voice, route matching and landscape/portrait controls are not modified by this update.
+- To update GitHub Pages replace `index.html`, `styles.css` and `app.js` (the versioned links in HTML refresh cached assets).
+
+### Navigation icon attribution
+Based on icons from [Lucide](https://lucide.dev/icons/), under the [ISC license](https://lucide.dev/license).
+Copyright (c) 2026 Lucide Icons and Contributors.
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted,
+provided that the copyright and permission notice appear in all copies.
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE.
+The SVGs are embedded in `index.html`/`app.js` and require no external download during navigation.

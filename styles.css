@@ -1727,3 +1727,37 @@ body.dark .myarah-navigation-arrow path { stroke: #10233a; stroke-width: .9px; }
 @media (prefers-reduced-motion: reduce) {
   .myarah-navigation-arrow { transition: none; }
 }
+
+/* Respect the Then row hidden state (author display:flex otherwise wins). */
+#navNextTurn[hidden]{display:none!important;}
+
+/* MyArah maneuver icons: consistent 24px SVG shapes in both guidance tiers.
+   Only the turn symbols are styled; existing map/nav controls are unchanged. */
+#navTurnSymbol svg{
+  display:block;width:38px;height:38px;max-width:82%;max-height:82%;
+  stroke:currentColor;stroke-width:2.65;flex:none;
+  filter:drop-shadow(0 1px 0 rgba(0,34,85,.18));
+}
+#navNextTurnSymbol{
+  flex:0 0 30px;width:30px;height:30px;
+  display:inline-flex;align-items:center;justify-content:center;
+  border-radius:10px;background:rgba(36,116,188,.09);
+  color:#236ca9;line-height:1;
+}
+#navNextTurnSymbol svg{
+  display:block;width:22px;height:22px;
+  stroke:currentColor;stroke-width:2.65;
+}
+body.dark #navNextTurnSymbol{
+  background:rgba(118,191,248,.17);
+  color:#a2d6ff;
+}
+@media (orientation:landscape) and (max-height:560px){
+  #navTurnSymbol svg{width:33px;height:33px;}
+  #navNextTurnSymbol{width:27px;height:27px;flex-basis:27px;border-radius:9px;}
+  #navNextTurnSymbol svg{width:19px;height:19px;}
+}
+@media (max-width:365px) and (orientation:portrait){
+  #navTurnSymbol svg{width:32px;height:32px;}
+  #navNextTurnSymbol{flex-basis:27px;width:27px;height:27px;}
+}

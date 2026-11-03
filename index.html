@@ -11,8 +11,8 @@
   <title>MyArah — Explore Malaysia</title>
   <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=myarah-filled-arrow-latest-1">
-  <script type="module" src="app.js?v=myarah-filled-arrow-latest-1"></script>
+  <link rel="stylesheet" href="styles.css?v=myarah-maneuver-icons-1">
+  <script type="module" src="app.js?v=myarah-maneuver-icons-1"></script>
 </head>
 <body>
   <main class="app" aria-label="MyArah map">
@@ -91,7 +91,7 @@
     <section id="navHud" class="nav-hud" aria-label="Turn-by-turn directions" hidden>
       <div class="nav-hud-turn surface">
         <div class="nav-turn-main">
-          <div id="navTurnSymbol" class="nav-turn-symbol" aria-hidden="true">↑</div>
+          <div id="navTurnSymbol" class="nav-turn-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg></div>
           <div class="nav-turn-copy">
             <span id="navTurnDistance" class="nav-turn-distance">Finding route…</span>
             <strong id="navTurnText" class="nav-turn-text">Preparing navigation</strong>
@@ -99,7 +99,7 @@
         </div>
         <div id="navNextTurn" class="nav-turn-next" hidden>
           <span class="nav-next-label">Then</span>
-          <span id="navNextTurnSymbol" class="nav-next-symbol" aria-hidden="true">↱</span>
+          <span id="navNextTurnSymbol" class="nav-next-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" focusable="false"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg></span>
           <span id="navNextTurnText" class="nav-next-text">Continue</span>
           <span id="navNextTurnDistance" class="nav-next-distance">in 300 m</span>
         </div>
