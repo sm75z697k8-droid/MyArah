@@ -1375,6 +1375,13 @@ if (trafficKey && trafficAutoResume) void turnTrafficOn(trafficKey, { quiet: tru
 const ROUTE_ENDPOINT = 'https://api.tomtom.com/maps/orbis/routing/routes/calculate?apiVersion=3';
 const ROUTE_SOURCE = 'myarah-route-geometry';
 const ROUTE_START_SOURCE = 'myarah-route-start';
+// Toll positions are grounded in TomTom's passTollgate maneuvers or toll-section bounds.
+// Orbis v3 does NOT provide a monetary toll price, so never fabricate one.
+const TOLL_MAX_MAP_MARKERS = 22;
+const TOLL_RATE_CHECK_URL = 'https://www.llm.gov.my/';
+const tollMapMarkers = [];
+let tollMarkerRoute = null;
+
 const ROUTE_LAYERS = ['myarah-route-alternative', 'myarah-route-selected-border', 'myarah-route-selected'];
 const routePlanButton = $('routePlan');
 const routePreview = $('routePreview');
@@ -1413,6 +1420,136 @@ function routeStartGeojson() {
   }] : [] };
 }
 
+
+// Coordinates for a maneuver offset: use the entire mapped polyline length,
+// not the raw point index, to avoid positioning a toll on the wrong bend.
+function routePointAtOffset(coordinates,offset,routeMeters){
+  if(!Array.isArray(coordinates)||!coordinates.length)return null;
+  if(coordinates.length===1)return [...coordinates[0]];
+  if(!Number.isFinite(routeMeters)||routeMeters<=0)return [...coordinates[0]];
+  const lengths=[];let total=0;
+  for(let i=1;i<coordinates.length;i++){
+    const length=haversineMeters(coordinates[i-1],coordinates[i]);
+    lengths.push(Number.isFinite(length)?Math.max(0,length):0);
+    total+=lengths[lengths.length-1];
+  }
+  if(total<=0)return [...coordinates[0]];
+  let target=Math.max(0,Math.min(1,(Number(offset)||0)/routeMeters))*total;
+  for(let i=1;i<coordinates.length;i++){
+    const length=lengths[i-1];
+    if(target<=length || i===coordinates.length-1){
+      const t=length>0?Math.min(1,Math.max(0,target/length)):0;
+      return [coordinates[i-1][0]+(coordinates[i][0]-coordinates[i-1][0])*t,
+        coordinates[i-1][1]+(coordinates[i][1]-coordinates[i-1][1])*t];
+    }
+    target-=length;
+  }
+  return [...coordinates[coordinates.length-1]];
+}
+function normalizeRouteTollPoints(raw,coordinates,routeMeters,instructions){
+  const points=[];
+  const gates=instructions.filter(i=>/^passTollgate$/i.test(i.maneuver));
+  // Guidance gates are actual mapped tollgate maneuvers and have precedence.
+  gates.forEach((gate,i)=>{
+    const point=routePointAtOffset(coordinates,gate.offset,routeMeters);
+    if(point && point.every(Number.isFinite))points.push({
+      kind:'gate',offset:gate.offset,coordinates:point,
+      label:`Toll plaza ${i+1}`,price:null
+    });
+  });
+  // Section start is NOT guaranteed to be a physical plaza.
+  // Show this only if no reported gate is near its location.
+  const sections=Array.isArray(raw.sections?.toll)?raw.sections.toll:[];
+  for(const section of sections){
+    const start=Number(section?.startPathIndex);
+    if(!Number.isInteger(start)||start<0||start>=coordinates.length)continue;
+    const point=coordinates[start];
+    if(!point?.every(Number.isFinite))continue;
+    if(points.some(g=>g.kind==='gate' && haversineMeters(point,g.coordinates)<450))continue;
+    // Match the geometry offset to the TomTom route distance.
+    let measured=0,total=0;
+    for(let i=1;i<coordinates.length;i++){
+      const d=haversineMeters(coordinates[i-1],coordinates[i]);
+      total+=d;if(i<=start)measured+=d;
+    }
+    const offset=total>0?measured/total*routeMeters:0;
+    // One toll section can be adjacent to another: avoid duplicate pins.
+    if(points.some(p=>p.kind==='section' && haversineMeters(point,p.coordinates)<120))continue;
+    points.push({kind:'section',offset,coordinates:[...point],
+      label:'Tolled road begins',price:null});
+  }
+  // Retain an honest ordering and bound the amount of UI over an extended trip.
+  return points.sort((a,b)=>a.offset-b.offset).slice(0,40);
+}
+function clearTollMapMarkers(){
+  tollMapMarkers.splice(0).forEach(({marker})=>marker.remove());
+  tollMarkerRoute=null;
+}
+function setTollMarkerVisibility(){
+  // When navigating, show only upcoming toll indicators; not those already passed.
+  const progress=navigation.active && navigation.route===tollMarkerRoute ? navigation.lastProgress : -Infinity;
+  for(const item of tollMapMarkers){
+    item.marker.getElement().style.display=progress>item.point.offset+110?'none':'';
+  }
+}
+function syncTollMapMarkers(){
+  const route=routeOptions[routeSelected]||null;
+  if(tollMarkerRoute===route){setTollMarkerVisibility();return;}
+  clearTollMapMarkers();
+  if(!route)return;
+  tollMarkerRoute=route;
+  for(const point of (route.tollPoints||[]).slice(0,TOLL_MAX_MAP_MARKERS)){
+    const el=document.createElement('button');
+    el.type='button';el.className='myarah-toll-map-marker';
+    el.classList.toggle('is-section',point.kind==='section');
+    el.setAttribute('aria-label',point.kind==='gate'?'View toll plaza':'View start of tolled road');
+    el.title=point.label;
+    // Static, self-contained SVG (no icon CDN required while driving).
+    el.innerHTML=point.kind==='gate'
+      ? '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2.5a2.5 2.5 0 0 0 0 5V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4.5a2.5 2.5 0 0 0 0-5Z"/><path d="M13 4v3m0 3v4m0 3v3" stroke-dasharray="2 2"/></svg>'
+      : '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V4m16 16V4M7 10h10m-10 4h10"/><path d="m9 7 3-3 3 3"/></svg>';
+    const marker=new maplibregl.Marker({element:el,anchor:'bottom',offset:[0,-6]})
+      .setLngLat(point.coordinates).addTo(map);
+    el.addEventListener('click',event=>{
+      event.stopPropagation();
+      const content=document.createElement('div');content.className='myarah-toll-popup';
+      const title=document.createElement('strong');title.textContent=point.label;
+      const fee=document.createElement('p');fee.textContent='Fare: not available in TomTom routing data';
+      const note=document.createElement('small');note.textContent=point.kind==='gate'
+        ? 'The tollgate location is based on the route guidance. Verify the fare for your vehicle and trip.'
+        : 'This is the start of a tolled-road section, not necessarily a payment booth.';
+      const link=document.createElement('a');link.href=TOLL_RATE_CHECK_URL;
+      link.target='_blank';link.rel='noopener noreferrer';link.textContent='Check official toll rates ↗';
+      content.append(title,fee,note,link);
+      new maplibregl.Popup({offset:22,maxWidth:'290px'}).setLngLat(point.coordinates)
+        .setDOMContent(content).addTo(map);
+    });
+    tollMapMarkers.push({marker,point});
+  }
+  setTollMarkerVisibility();
+}
+function renderSelectedTolls(){
+  const box=$('routeTolls'),list=$('routeTollItems'),route=routeOptions[routeSelected];
+  list.replaceChildren();
+  if(!route || !(route.tollPoints?.length)){
+    box.hidden=true;return;
+  }
+  box.hidden=false;
+  for(const point of route.tollPoints){
+    const row=document.createElement('div');row.className='route-toll-item';
+    const glyph=document.createElement('span');glyph.className='route-toll-glyph';
+    glyph.textContent=point.kind==='gate'?'▣':'≋';glyph.setAttribute('aria-hidden','true');
+    const copy=document.createElement('span');copy.className='route-toll-copy';
+    const name=document.createElement('strong');name.textContent=point.label;
+    const distance=document.createElement('small');
+    distance.textContent=`${routeDistance(point.offset)} from start · ${point.kind==='gate'?'Mapped tollgate':'Toll-road section'}`;
+    copy.append(name,distance);
+    const fare=document.createElement('span');fare.className='route-toll-fare';
+    fare.textContent='RM —';fare.title='Price not provided by TomTom; check official calculator';
+    row.append(glyph,copy,fare);list.append(row);
+  }
+}
+
 function syncRouteLayers() {
   const style = map.getStyle();
   if (!style?.layers?.length) return;
@@ -1443,6 +1580,7 @@ function syncRouteLayers() {
   }
   // Keep the accurate destination pin on top of route geometry.
   if (map.getLayer(SELECTED_PIN_LAYER)) map.moveLayer(SELECTED_PIN_LAYER);
+  syncTollMapMarkers();
 }
 map.on('style.load', () => { requestAnimationFrame(syncRouteLayers); });
 
@@ -1450,6 +1588,8 @@ function clearRouteGeometry() {
   routeOptions = [];
   routeSelected = 0;
   routeCards.replaceChildren();
+  $('routeTolls').hidden=true;
+  clearTollMapMarkers();
   refreshNavigationStart();
   if (map.getSource(ROUTE_SOURCE)) map.getSource(ROUTE_SOURCE).setData(routeGeojson());
 }
@@ -1502,20 +1642,22 @@ function normalizeProviderRoutes(payload) {
         !Number.isFinite(seconds) || seconds < 0 ||
         !Number.isFinite(meters) || meters < 0) return null;
     const delay = Number(summary.trafficDelayDurationInSeconds);
+    const coords=path.map(point=>[point[0],point[1]]);
+    const instructions=Array.isArray(raw.instructions)?raw.instructions
+      .filter(item=>Number.isFinite(item?.routeOffsetInMeters) && item.routeOffsetInMeters>=0 &&
+        typeof item.maneuver==='string')
+      .map(item=>({maneuver:item.maneuver,offset:item.routeOffsetInMeters,
+        message:typeof item.message==='string'?item.message.trim().slice(0,260):''}))
+      .sort((a,b)=>a.offset-b.offset):[];
+    const tollPoints=normalizeRouteTollPoints(raw,coords,meters,instructions);
     return {
-      coordinates: path.map(point => [point[0], point[1]]),
+      coordinates: coords,
       seconds, meters,
       delay: Number.isFinite(delay) && delay >= 0 ? delay : null,
-      toll: Array.isArray(raw.sections?.toll) && raw.sections.toll.length > 0,
+      toll:tollPoints.length>0,
+      tollPoints,
       arrival: summary.arrivalDateTime || null,
-      instructions: Array.isArray(raw.instructions) ? raw.instructions
-        .filter(item => Number.isFinite(item?.routeOffsetInMeters) && item.routeOffsetInMeters >= 0 &&
-          typeof item.maneuver === 'string')
-        .map(item => ({
-          maneuver: item.maneuver,
-          offset: item.routeOffsetInMeters,
-          message: typeof item.message === 'string' ? item.message.trim().slice(0,260) : ''
-        })).sort((a,b) => a.offset - b.offset) : []
+      instructions
     };
   }).filter(Boolean);
   // Do not invent three choices if the backend can only find one or two.
@@ -1539,7 +1681,7 @@ function renderRouteCards() {
     const detailParts=[routeDistance(route.meters)];
     if (route.delay !== null) detailParts.push(route.delay >= 30 ? `+${Math.ceil(route.delay/60)} min traffic` : 'No significant traffic delay');
     else detailParts.push('Traffic estimate included');
-    if (route.toll) detailParts.push('Toll sections');
+    if (route.toll) detailParts.push(`${route.tollPoints.length} toll indicator${route.tollPoints.length===1?'':'s'} · fare unavailable`);
     detail.textContent=detailParts.join(' · ');
     const lower=document.createElement('div'); lower.className='route-card-bottom';
     lower.textContent = index===routeSelected ? 'Selected · highlighted blue' : 'Tap to preview this route';
@@ -1547,6 +1689,7 @@ function renderRouteCards() {
     card.addEventListener('click',() => selectRoute(index));
     routeCards.append(card);
   });
+  renderSelectedTolls();
   refreshNavigationStart();
 }
 
@@ -2717,6 +2860,7 @@ function navEtaPaceAdjustment(route,eta,baselineSeconds,now){
 function refreshNavTrip(now=Date.now()){
   const route=navigation.route,eta=navigation.eta;
   if(!navigation.active || !route || !eta)return;
+  setTollMarkerVisibility();
   if(navigation.offRoute){
     $('navRemaining').textContent='Route needs update';
     $('navEta').textContent='ETA — · off route';
@@ -2983,6 +3127,7 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   closeVoiceMenu({immediate:true,restoreFocus:false});
   navHud.hidden=true;navFooter.hidden=true;
   appRoot.classList.remove('navigation-active');
+  setTollMarkerVisibility();
   navigation.follow=true;navigation.voiced=false;navigation.turnIndex=-1;
   navigation.alertSpoken.clear();
   navigation.spoken.clear();navigation.guidanceSpeed=null;

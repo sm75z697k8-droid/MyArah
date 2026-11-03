@@ -11,8 +11,8 @@
   <title>MyArah — Explore Malaysia</title>
   <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=myarah-glass-smooth-1">
-  <script type="module" src="app.js?v=myarah-glass-smooth-1"></script>
+  <link rel="stylesheet" href="styles.css?v=myarah-malaysia-tolls-1">
+  <script type="module" src="app.js?v=myarah-malaysia-tolls-1"></script>
 </head>
 <body>
   <main class="app" aria-label="MyArah map">
@@ -75,6 +75,12 @@
             <p id="routeDestination" class="route-destination"></p>
             <p id="routeStatus" class="route-status" role="status" aria-live="polite">Choose a starting point.</p>
             <div id="routeCards" class="route-cards" role="group" aria-label="Suggested routes"></div>
+            <section id="routeTolls" class="route-tolls" aria-label="Tolls on the selected route" hidden>
+              <div class="route-tolls-heading"><span class="route-tolls-heading-icon" aria-hidden="true">RM</span><strong>Tolls on this route</strong></div>
+              <div id="routeTollItems" class="route-toll-items"></div>
+              <p class="route-toll-note">Toll locations come from routing data. Fees are not supplied by TomTom; a tolled-road marker may not be a payment plaza. Class 1 car fares can depend on entry and exit.</p>
+              <div class="route-toll-links"><a href="https://www.plus.com.my/" target="_blank" rel="noopener noreferrer">PLUS toll calculator ↗</a><a href="https://www.llm.gov.my/" target="_blank" rel="noopener noreferrer">LLM toll calculator ↗</a></div>
+            </section>
             <button id="navStart" class="nav-start" type="button" disabled hidden>Start navigation <span aria-hidden="true">→</span></button>
             <button id="routePickOrigin" type="button" class="route-pick-origin">Choose start on map</button>
             <p class="route-disclaimer">Travel times are estimates from TomTom live and historical traffic where available. Road conditions may change. Navigation is a foreground preview; keep your attention on the road.</p>

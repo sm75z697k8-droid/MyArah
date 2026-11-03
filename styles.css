@@ -2203,3 +2203,44 @@ body[data-myarah-optical="on"] .myarah-optical-lens {
   backface-visibility: hidden;
   transform: translateZ(0);
 }
+
+
+/* === Malaysia toll preview (selected route; honest fee availability) === */
+.route-tolls[hidden]{display:none!important}
+.route-tolls{margin-top:12px;padding:13px 12px 12px;border:1px solid #dae5ef;
+  background:rgba(244,249,255,.88);border-radius:16px;color:#203a54}
+.route-tolls-heading{display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:7px}
+.route-tolls-heading-icon{display:grid;place-items:center;border-radius:9px;width:32px;height:30px;
+  background:#176eb8;color:#fff;font-size:11px;font-weight:850}
+.route-toll-items{display:grid;gap:0}
+.route-toll-item{display:flex;align-items:center;gap:10px;padding:9px 0;
+  border-bottom:1px solid rgba(88,121,150,.14)}
+.route-toll-glyph{display:grid;place-items:center;flex:0 0 30px;width:30px;height:30px;
+  background:#e0efff;border-radius:50%;color:#1768a9;font-size:17px;font-weight:800}
+.route-toll-copy{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.route-toll-copy strong{font-size:12px;font-weight:760}
+.route-toll-copy small{font-size:10px;line-height:1.4;color:#607c95}
+.route-toll-fare{font-size:13px;font-weight:850;white-space:nowrap;font-variant-numeric:tabular-nums}
+.route-toll-note{margin:10px 0 7px;font-size:10px;line-height:1.6;color:#637c91}
+.route-toll-links{display:flex;gap:12px;flex-wrap:wrap}
+.route-toll-links a{color:#1466a4;font-size:11px;font-weight:750;text-underline-offset:3px}
+.myarah-toll-map-marker{display:grid;place-items:center;position:relative;
+  width:42px;height:42px;border-radius:50%;border:3px solid white;
+  background:#126cb4;color:#fff;box-shadow:0 2px 0 rgba(12,44,75,.22),0 5px 15px rgba(13,46,70,.29);
+  cursor:pointer;padding:0;touch-action:manipulation}
+.myarah-toll-map-marker:after{content:"";position:absolute;bottom:-8px;left:calc(50% - 5px);
+  width:10px;height:10px;border-radius:2px 0 2px 0;background:inherit;transform:rotate(45deg)}
+.myarah-toll-map-marker.is-section{background:#9a6425}
+.myarah-toll-map-marker svg{position:relative;z-index:1;pointer-events:none}
+.myarah-toll-map-marker:focus-visible{outline:3px solid #f7ac39;outline-offset:3px}
+.myarah-toll-popup{display:flex;flex-direction:column;gap:7px;color:#1b3249;min-width:180px}
+.myarah-toll-popup strong{font-size:15px}
+.myarah-toll-popup p{font-size:12px;margin:0;font-weight:750}
+.myarah-toll-popup small{font-size:11px;line-height:1.45;color:#526d82}
+.myarah-toll-popup a{font-size:12px;color:#1167a9;font-weight:750}
+body.dark .route-tolls{background:rgba(31,48,67,.94);border-color:#476076;color:#eaf5ff}
+body.dark .route-toll-item{border-bottom-color:rgba(187,210,231,.18)}
+body.dark .route-toll-glyph{background:#244e6d;color:#c8eaff}
+body.dark .route-toll-copy small,body.dark .route-toll-note{color:#bdd0df}
+body.dark .route-toll-links a{color:#a4d9ff}
+@media(max-width:365px){.route-toll-links{gap:8px}.route-toll-copy strong{font-size:11px}}

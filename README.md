@@ -553,3 +553,12 @@ Aligned the left edge of the speedometer with the existing trip-summary glass pi
 - `?glass=off` still disables the experimental refraction and WebGL preserved drawing buffer for a lightweight comparison.
 - Optical refraction still uses canvas readback; WebKit/iPhone GPU performance and battery consumption can vary. This is not native Apple's Liquid Glass.
 - Changed `app.js` (rendering optimization), `styles.css` (lens compositing only), `index.html` (cache refresh), README. Navigation, GPS, ETA, voice and routing functions are untouched.
+
+
+## Malaysia toll indicators (November 2026)
+
+- Shows a blue ticket pin for TomTom `passTollgate` maneuvers, and an amber road pin for the beginning of TomTom `sections.toll` when no matching tollgate was reported. Amber pins **are not claimed to be payment booths**.
+- Selecting a route shows each toll indicator and its distance from the start. Only upcoming toll indicators remain visible as navigation progresses. Alternative routes refresh the list and pins.
+- TomTom Orbis Routing v3 gives toll sections but **does not provide Malaysian toll prices**. MyArah displays `RM —` (unavailable) for each entry, not fabricated fares. Rates depend on vehicle class, operator, and often the exact entry/exit plazas.
+- The existing route preview links to the official LLM and PLUS toll calculators to check fees. Neither site is scraped or called from the browser.
+- This update preserves routing, automatic recalculation, ETA, GPS, voice, speed and experimental Liquid Glass code.
