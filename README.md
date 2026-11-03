@@ -296,3 +296,15 @@ This update adds **real provider maneuver instructions**, a continuous GPS watch
 - Text-to-speech uses the Web Speech API (if available) only when activated; it may be interrupted by iOS, silent mode, or browser policies.
 - **Not a safety-certified navigation system.** Do not rely on this web prototype as the sole navigation aid while driving; obey signs and rules. Test it as a passenger or while stationary before any real-world use. The PWA does **not** promise background tracking, lock-screen directions, CarPlay or accurate lane-level positioning. No autonomous driving or automated traffic hazard detection is included.
 - The key stored in browser storage is visible in the browser's own requests. A public app should use an appropriate proxy and provider-approved access restrictions.
+
+
+## GPS smoothing & local route matching (new)
+
+- During **Start navigation**, MyArah indexes the selected TomTom route and projects sufficiently accurate GPS fixes onto its road geometry. The blue marker glides along that matched route rather than jittering with each raw latitude/longitude reading.
+- Nearby route segments are scored with **GPS accuracy, driving heading (only at speed), and recent route progress**. Matching is cautious around U-turns, overpasses, parallel roads and junctions.
+- Camera orientation uses a short **look-ahead along the route**, filtered to reduce sudden spinning at low speed. Small stationary position changes do not continuously recenter the camera.
+- Noisy, stale, duplicate, or physically implausible GPS fixes are ignored. The existing off-route alert uses the **raw GPS distance** from the route, with repeated-fix confirmation and recovery hysteresis. A point too far or too uncertain to match is **never silently forced onto the route**.
+- After rerouting, the geometry index and smoothing state reset to the new TomTom route. Recalculation still starts from raw GPS, not the snapped display marker.
+- Arrival now requires two reasonably accurate readings near the destination.
+
+**Scope:** This is *on-device matching to the already selected route*, not a full traffic-aware road-network map-matching service. Nearby parallel streets may still be indistinguishable from consumer GPS alone. Traffic ETA updates, automatic rerouting and lock-screen navigation are still out of scope. Test while parked or as a passenger; don't rely on this prototype for safety-critical driving.

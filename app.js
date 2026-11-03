@@ -1516,7 +1516,12 @@ const navigation = {
   lastBearing:null, markerAnimation:0, markerPoint:null,
   follow:true, voiced:false, spoken:new Set(), turnIndex:-1,
   offCount:0, offRoute:false, rerouting:false, lastReroute:0,
-  lastPosition:null, announcedArrival:false
+  lastPosition:null, announcedArrival:false,
+  // Indexed route geometry and filtered position are held only during guidance.
+  routeIndex:null, matchedAlong:null, drawnAlong:null,
+  lastRawFix:null, lastAcceptedTime:0, lastCameraPoint:null,
+  lastCameraBearing:null, offSince:0, onCount:0, arrivalCount:0,
+  lastAlert:''
 };
 const navStartButton=$('navStart');
 const navHud=$('navHud');
@@ -1598,35 +1603,165 @@ function computePolylineProgress(coords,position){
     bearing:bearingBetween(coords[best.index],next)};
 }
 
-function animateNavigationMarker(coords){
+// Local route matching: project usable GPS fixes onto *the selected TomTom route*.
+// This is route-corridor matching, NOT a network-wide map-matching service.
+// Restrict candidate segments by recent route progress to avoid hopping between
+// nearby flyovers, parallel roads and U-turns. Off-route detection uses RAW GPS.
+const NAV_FIX_MAX_AGE_MS = 15000;
+const NAV_FIX_MAX_ACCURACY_M = 85;
+const NAV_OFF_ROUTE_FIXES = 3;
+const NAV_OFF_ROUTE_CONFIRM_MS = 2500;
+function routeGeometryIndex(coordinates){
+  if(!Array.isArray(coordinates) || coordinates.length<2) return null;
+  let total=0;
+  const segments=[];
+  for(let i=0;i<coordinates.length-1;i++){
+    const a=coordinates[i], b=coordinates[i+1];
+    if(!a?.every?.(Number.isFinite) || !b?.every?.(Number.isFinite)) continue;
+    const meters=haversineMeters(a,b);
+    if(!Number.isFinite(meters) || meters<0.1) continue;
+    segments.push({a,b,start:total,length:meters,bearing:bearingBetween(a,b)});
+    total+=meters;
+  }
+  return total>0 ? {segments,total} : null;
+}
+function routePointAt(index,along){
+  if(!index?.segments.length) return null;
+  const bounded=Math.max(0,Math.min(index.total,along));
+  let left=0,right=index.segments.length-1;
+  while(left<right){
+    const mid=(left+right)>>1;
+    if(index.segments[mid].start+index.segments[mid].length < bounded) left=mid+1;
+    else right=mid;
+  }
+  const s=index.segments[left];
+  const t=Math.max(0,Math.min(1,(bounded-s.start)/s.length));
+  return [s.a[0]+(s.b[0]-s.a[0])*t,s.a[1]+(s.b[1]-s.a[1])*t];
+}
+function routeHeadingAt(index,along,speed){
+  const lookAhead=Math.max(14,Math.min(35,(Number.isFinite(speed)?speed:0)*1.6+16));
+  const from=routePointAt(index,Math.max(0,along-7));
+  const to=routePointAt(index,Math.min(index.total,along+lookAhead));
+  return from && to && haversineMeters(from,to)>1 ? bearingBetween(from,to) : null;
+}
+function matchGpsToRoute(index,position,opts={}){
+  if(!index?.segments?.length || !position?.every?.(Number.isFinite)) return null;
+  const latitudeCos=Math.max(.15,Math.cos(position[1]*Math.PI/180));
+  const prior=Number.isFinite(opts.priorAlong)?opts.priorAlong:null;
+  const dt=Number.isFinite(opts.elapsedSeconds)?opts.elapsedSeconds:Infinity;
+  const accuracy=Number.isFinite(opts.accuracy)?opts.accuracy:30;
+  const speed=Number.isFinite(opts.speed)?Math.max(0,opts.speed):null;
+  const heading=Number.isFinite(opts.heading)?opts.heading:null;
+  // Allow a larger search window after GPS gaps; never force an ambiguous match.
+  const contiguous=prior!==null && dt<18;
+  const maxAhead=Math.max(90,(speed??28)*Math.max(.5,dt)*2.25+accuracy*2+42);
+  const maxBack=Math.max(38,accuracy*2+18);
+  let nearest=null,best=null;
+  for(const s of index.segments){
+    const ax=(s.a[0]-position[0])*111320*latitudeCos;
+    const ay=(s.a[1]-position[1])*110540;
+    const bx=(s.b[0]-position[0])*111320*latitudeCos;
+    const by=(s.b[1]-position[1])*110540;
+    const dx=bx-ax,dy=by-ay;
+    const lengthSquared=dx*dx+dy*dy;
+    if(lengthSquared<.001) continue;
+    const t=Math.max(0,Math.min(1,-(ax*dx+ay*dy)/lengthSquared));
+    const distance=Math.hypot(ax+t*dx,ay+t*dy);
+    const along=s.start+s.length*t;
+    const match={distance,along,bearing:s.bearing,
+      coords:[s.a[0]+(s.b[0]-s.a[0])*t,s.a[1]+(s.b[1]-s.a[1])*t]};
+    if(!nearest || distance<nearest.distance) nearest=match;
+    if(contiguous && (along<prior-maxBack || along>prior+maxAhead)) continue;
+    // GPS course has value only at driving speeds and when accuracy is decent.
+    const headingError=heading!==null && speed!==null && speed>=3 && accuracy<=40 ?
+      Math.abs(smallestAngle(heading-s.bearing)) : 0;
+    const headingPenalty=Math.min(34,headingError*0.16);
+    const continuityPenalty=contiguous ? Math.min(26,Math.abs(along-prior)*.035) : 0;
+    const score=distance+headingPenalty+continuityPenalty;
+    if(!best || score<best.score) best={...match,score};
+  }
+  if(!nearest)return null;
+  // A map match must also be supported by the GPS accuracy, not merely by an
+  // adjacent road being close to the reported point.
+  const snapRadius=Math.max(15,Math.min(36,accuracy*1.25+13));
+  const valid=!!best && best.distance<=snapRadius &&
+    best.distance<=nearest.distance+Math.max(8,accuracy*.65);
+  const match=best||nearest;
+  return {...match,valid,nearestDistance:nearest.distance,
+    fraction:match.along/index.total,snapRadius};
+}
+function stableRouteBearing(target,speed){
+  if(!Number.isFinite(target)) return navigation.lastBearing;
+  const last=navigation.lastBearing;
+  if(!Number.isFinite(last)) return target;
+  // At walking/standing speeds, do not spin the camera based on GPS noise.
+  if(!Number.isFinite(speed) || speed<1.25) return last;
+  const delta=smallestAngle(target-last);
+  const weight=speed>7 ? .58 : .38;
+  return normalizedHeading(last+delta*weight);
+}
+
+function animateNavigationMarker(coords,along=null,elapsedMs=1000){
   cancelAnimationFrame(navigation.markerAnimation);
   const previous=navigation.markerPoint || coords;
   const from=[...previous],to=[...coords];
-  const start=performance.now(),duration=reducedMotion?0:660;
-  if(duration===0){navigation.markerPoint=to;showUserLocation(to);return;}
+  const fromAlong=navigation.drawnAlong;
+  const pathAnimation=Number.isFinite(fromAlong) && Number.isFinite(along) &&
+    navigation.routeIndex && Math.abs(along-fromAlong)<180;
+  const start=performance.now();
+  // Keep animation slightly shorter than an ordinary GPS interval, preventing
+  // overlapping easing that makes motion lag behind the car.
+  const duration=reducedMotion?0:Math.min(820,Math.max(290,elapsedMs*.76));
+  const render=(t)=>{
+    const e=t*t*(3-2*t);
+    const drawn=pathAnimation ? fromAlong+(along-fromAlong)*e : null;
+    navigation.markerPoint=pathAnimation ?
+      routePointAt(navigation.routeIndex,drawn) :
+      [from[0]+(to[0]-from[0])*e,from[1]+(to[1]-from[1])*e];
+    navigation.drawnAlong=drawn;
+    showUserLocation(navigation.markerPoint);
+  };
+  if(duration===0){
+    navigation.markerPoint=to;
+    navigation.drawnAlong=Number.isFinite(along)?along:null;
+    showUserLocation(to);return;
+  }
   const animate=now=>{
     if(!navigation.active) return;
     const t=Math.min(1,(now-start)/duration);
-    const e=t*t*(3-2*t);
-    navigation.markerPoint=[from[0]+(to[0]-from[0])*e,from[1]+(to[1]-from[1])*e];
-    showUserLocation(navigation.markerPoint);
-    if(t<1) navigation.markerAnimation=requestAnimationFrame(animate);
+    render(t);
+    if(t<1)navigation.markerAnimation=requestAnimationFrame(animate);
+    else {
+      navigation.markerAnimation=0;navigation.markerPoint=to;
+      navigation.drawnAlong=Number.isFinite(along)?along:null;
+      showUserLocation(to);
+    }
   };
   navigation.markerAnimation=requestAnimationFrame(animate);
 }
 
 function followNavigationCamera(coords,bearing,force=false){
-  if(!navigation.follow || !navigation.active || document.hidden) return;
+  if(!navigation.follow || !navigation.active || document.hidden || !coords)return;
   const now=performance.now();
-  if(!force && now-navigation.lastCamera<620) return;
-  navigation.lastCamera=now;
+  const since=now-navigation.lastCamera;
+  if(!force && since<470) return;
   const angle=Number.isFinite(bearing)?bearing:(navigation.lastBearing??map.getBearing());
-  if(Number.isFinite(angle)) navigation.lastBearing=angle;
+  const distance=navigation.lastCameraPoint?haversineMeters(coords,navigation.lastCameraPoint):Infinity;
+  const turn=navigation.lastCameraBearing===null?Infinity:
+    Math.abs(smallestAngle(angle-navigation.lastCameraBearing));
+  // Avoid repeated animations to the same center while parked, but allow a
+  // periodic resync when iOS reports a resized viewport.
+  if(!force && distance<2.5 && turn<4 && since<2800) return;
+  navigation.lastCamera=now;
+  navigation.lastCameraPoint=[...coords];
+  navigation.lastCameraBearing=angle;
+  navigation.lastBearing=angle;
   const height=appRoot.getBoundingClientRect().height;
   map.easeTo({
     center:coords, zoom:16.8, pitch:53, bearing:angle,
     offset:[0,Math.round(height*.16)],
-    duration:reducedMotion?0:780, easing:cameraEase, essential:true
+    duration:reducedMotion?0:Math.min(850,Math.max(480,since*.86)),
+    easing:cameraEase, essential:true
   });
 }
 
@@ -1688,48 +1823,127 @@ function refreshNavTrip(progress){
   $('navEta').textContent=`ETA ${eta.toLocaleTimeString('en-MY',{hour:'numeric',minute:'2-digit'})} · approx.`;
 }
 function onNavigationLocation(position){
-  if(!navigation.active)return;
+  if(!navigation.active || !navigation.routeIndex)return;
   const point=[position.coords.longitude,position.coords.latitude];
   const accuracy=Number(position.coords.accuracy);
   if(!point.every(Number.isFinite))return;
   const now=Date.now();
-  navigation.lastPosition=position;
-  // GPS updates may be inaccurate: never promote poor fixes to turn guidance.
-  if(!Number.isFinite(accuracy) || accuracy>85){
-    updateNavAlert('GPS signal weak — waiting for a more accurate position');
-    return;
+  const stamp=Number(position.timestamp)||now;
+  if(now-stamp>NAV_FIX_MAX_AGE_MS || stamp>now+3000){
+    updateNavAlert('Waiting for a fresh GPS position…');return;
   }
-  const progress=computePolylineProgress(navigation.route.coordinates,point);
-  if(!progress)return;
-  animateNavigationMarker(point);
+  if(!Number.isFinite(accuracy) || accuracy>NAV_FIX_MAX_ACCURACY_M){
+    updateNavAlert('GPS signal weak — holding your last reliable position');return;
+  }
+  const previous=navigation.lastRawFix;
+  if(previous && stamp<=previous.stamp)return; // Ignore cached/duplicate readings.
+  const elapsedMs=previous?Math.max(100,stamp-previous.stamp):1000;
+  const dt=elapsedMs/1000;
+  const reportedSpeed=Number.isFinite(position.coords.speed) && position.coords.speed>=0 ? position.coords.speed:null;
+  // Some iPhone browsers omit the GPS speed field even while driving. Infer
+  // speed only from two reasonably accurate fixes sufficiently far apart.
+  const displacement=previous?haversineMeters(previous.point,point):0;
+  const inferredSpeed=previous && dt>=.7 && dt<=10 && accuracy<=30 &&
+    previous.accuracy<=30 && displacement>Math.max(7,(accuracy+previous.accuracy)*.7) ?
+    Math.min(42,displacement/dt):null;
+  const speed=reportedSpeed!==null || inferredSpeed!==null ?
+    Math.max(reportedSpeed??0,inferredSpeed??0) : null;
+  if(previous && dt<16){
+    const moved=displacement;
+    const possible=Math.max(80,Math.max(speed??0,previous.speed??0,40)*dt*1.6 +
+      accuracy+previous.accuracy);
+    if(moved>possible){
+      updateNavAlert('GPS jumped unexpectedly — waiting for another fix');
+      return;
+    }
+  }
+  const course=Number.isFinite(position.coords.heading) && position.coords.heading>=0 ?
+    position.coords.heading:null;
+  const match=matchGpsToRoute(navigation.routeIndex,point,{
+    priorAlong:navigation.matchedAlong,elapsedSeconds:dt,accuracy,speed,heading:course
+  });
+  if(!match)return;
+  navigation.lastRawFix={point:[...point],accuracy,speed,stamp};
+  navigation.lastPosition=position;
+  navigation.lastAcceptedTime=now;
+  // Keep RAW location as the origin for recalculation. Do not reroute from a
+  // point artificially snapped onto the old road.
   navigation.lastCoords=point;
-  const isOff=progress.distance>Math.max(65,Math.min(110,accuracy*2.2));
-  navigation.offCount=isOff?navigation.offCount+1:0;
-  navigation.offRoute=navigation.offCount>=3;
-  if(navigation.offRoute){
-    updateNavAlert('You may be off route. Recalculate using live GPS.');
-    $('navReroute').hidden=false;
+  const offThreshold=Math.max(38,Math.min(106,accuracy*1.8+22));
+  const recoveredThreshold=Math.max(22,Math.min(63,accuracy*1.3+14));
+  const definitelyOff=match.nearestDistance>offThreshold;
+  const clearlyOn=match.valid && match.nearestDistance<recoveredThreshold;
+  if(definitelyOff){
+    navigation.offCount++;
+    navigation.onCount=0;
+    if(!navigation.offSince)navigation.offSince=now;
+    if(navigation.offCount>=NAV_OFF_ROUTE_FIXES &&
+        now-navigation.offSince>=NAV_OFF_ROUTE_CONFIRM_MS) navigation.offRoute=true;
+  }else if(clearlyOn){
+    navigation.onCount++;
+    // A credible on-road fix breaks a run of suspicious off-route readings.
+    navigation.offCount=0;
+    navigation.offSince=0;
+    // Require two credible readings before clearing a confirmed deviation.
+    if(navigation.onCount>=2)navigation.offRoute=false;
   }else{
-    $('navReroute').hidden=true;
-    updateNavAlert('');
-    // Allow a little GPS backtracking without jumping the instructions backwards.
-    navigation.lastProgress=Math.max(navigation.lastProgress,Math.min(navigation.route.meters,progress.fraction*navigation.route.meters));
+    navigation.onCount=0;
+    // A marginal reading should not undo a confirmed deviation.
+  }
+  $('navReroute').hidden=!navigation.offRoute;
+  let display=point;
+  let matchedDisplayAlong=null;
+  let bearing=navigation.lastBearing;
+  if(navigation.offRoute){
+    // Remove the old along-route anchor: a genuinely deviated driver may
+    // rejoin farther along (or earlier), not beside the last trusted sample.
+    navigation.matchedAlong=null;
+    updateNavAlert('You may be off route. Recalculate using live GPS.');
+  }else if(match.valid && !definitelyOff){
+    // Filter *distance along the route*, not raw lat/lon. This prevents a
+    // smoothed marker from cutting across corners or drifting off the road.
+    const oldAlong=navigation.matchedAlong;
+    if(oldAlong===null){
+      navigation.matchedAlong=match.along;
+    }else{
+      const step=match.along-oldAlong;
+      // Tiny movements while stopped are usually GPS jitter.
+      const weight=speed!==null && speed<1.25 ? .18 :
+        accuracy>35 ? .48 : .82;
+      if(Math.abs(step)>=3 || speed>=2.0){
+        navigation.matchedAlong=Math.max(0,Math.min(navigation.routeIndex.total,
+          oldAlong+step*weight));
+      }
+    }
+    matchedDisplayAlong=navigation.matchedAlong;
+    display=routePointAt(navigation.routeIndex,matchedDisplayAlong)||point;
+    navigation.lastProgress=Math.max(navigation.lastProgress,
+      Math.min(navigation.route.meters,
+        matchedDisplayAlong/navigation.routeIndex.total*navigation.route.meters));
     refreshNavigationGuidance(navigation.lastProgress);
     refreshNavTrip(navigation.lastProgress);
+    const heading=routeHeadingAt(navigation.routeIndex,matchedDisplayAlong,speed);
+    bearing=stableRouteBearing(heading,speed);
+    updateNavAlert('');
+  }else{
+    // Important: uncertain readings are displayed at their measured point,
+    // not forced onto the route (e.g. a genuine wrong exit or parallel road).
+    updateNavAlert('Checking your position near the route…');
   }
-  let bearing=null;
-  if(Number.isFinite(position.coords.heading) && position.coords.heading>=0 && position.coords.speed>1.5)
-    bearing=position.coords.heading;
-  else if(Number.isFinite(progress.bearing)) bearing=progress.bearing;
-  followNavigationCamera(point,bearing);
-  // Only declare arrival on repeated GPS fixes near the destination.
+  animateNavigationMarker(display,matchedDisplayAlong,elapsedMs);
+  if(Number.isFinite(bearing))navigation.lastBearing=bearing;
+  followNavigationCamera(display,bearing);
+  // Require two close, precise readings before announcing arrival.
   const toDestination=haversineMeters(point,chosen.coords);
-  if(!navigation.offRoute && toDestination<30 && navigation.lastProgress>=navigation.route.meters-100){
-    if(!navigation.announcedArrival){
-      navigation.announcedArrival=true;
-      speakDirection('You have arrived at your destination');
-      endNavigation('Arrived at destination');
-    }
+  if(!navigation.offRoute && clearlyOn && accuracy<=35 && toDestination<25 &&
+      navigation.lastProgress>=navigation.route.meters-85){
+    navigation.arrivalCount++;
+  }else navigation.arrivalCount=0;
+  if(navigation.arrivalCount>=2 && !navigation.announcedArrival){
+    navigation.announcedArrival=true;
+    speakDirection('You have arrived at your destination');
+    endNavigation('Arrived at destination');
+    return;
   }
   navigation.lastUpdate=now;
 }
@@ -1746,6 +1960,10 @@ function endNavigation(message='Navigation ended'){
   appRoot.classList.remove('navigation-active');
   navigation.follow=true;navigation.voiced=false;navigation.turnIndex=-1;
   navigation.spoken.clear();navigation.offCount=0;navigation.offRoute=false;
+  navigation.routeIndex=null;navigation.matchedAlong=null;navigation.drawnAlong=null;
+  navigation.lastRawFix=null;navigation.lastCameraPoint=null;
+  navigation.lastCameraBearing=null;navigation.offSince=0;navigation.onCount=0;
+  navigation.arrivalCount=0;
   $('navReroute').hidden=true;updateNavAlert('');
   $('navSound').textContent='Voice off';$('navSound').setAttribute('aria-pressed','false');
   $('navFollow').textContent='Follow';
@@ -1778,12 +1996,28 @@ function startNavigation(){
       setRouteStatus('Your current GPS position is far from this route or inaccurate. Refresh routes from your GPS, then tap Start.',true);
       refreshNavigationStart();return;
     }
+    const index=routeGeometryIndex(route.coordinates);
+    if(!index){
+      setRouteStatus('Route geometry unavailable. Compare routes again.',true);
+      refreshNavigationStart();return;
+    }
+    const initial=matchGpsToRoute(index,point,{
+      accuracy:Number(position.coords.accuracy),speed:position.coords.speed,
+      heading:position.coords.heading
+    });
+    const matched=initial?.valid?initial:null;
+    const displayed=matched?.coords||point;
     Object.assign(navigation,{
-      active:true,destinationId,route,lastCoords:point,
-      lastProgress:Math.max(0,snap.fraction*route.meters),
+      active:true,destinationId,route,lastCoords:point,routeIndex:index,
+      lastProgress:Math.max(0,(matched?.along/index.total??snap.fraction)*route.meters),
       lastUpdate:Date.now(),lastCamera:0,lastBearing:null,follow:true,
       turnIndex:-1,offCount:0,offRoute:false,voiced:false,announcedArrival:false,
-      markerPoint:point,spoken:new Set(),lastPosition:position
+      markerPoint:displayed,drawnAlong:matched?.along??null,
+      matchedAlong:matched?.along??null,spoken:new Set(),lastPosition:position,
+      lastRawFix:{point:[...point],accuracy:position.coords.accuracy,
+        speed:position.coords.speed,stamp:Number(position.timestamp)||Date.now()},
+      lastAcceptedTime:Date.now(),lastCameraPoint:null,lastCameraBearing:null,
+      offSince:0,onCount:0,arrivalCount:0
     });
     // Search-keyboard scroll recovery can leave iOS visually shifted.
     // Restore the map viewport before showing the fixed-position navigation HUD.
@@ -1795,10 +2029,10 @@ function startNavigation(){
     appRoot.classList.add('navigation-active');
     navHud.hidden=false;navFooter.hidden=false;
     $('navFollow').textContent='Following';
-    showUserLocation(point);
+    showUserLocation(displayed);
     refreshNavigationGuidance(navigation.lastProgress);
     refreshNavTrip(navigation.lastProgress);
-    followNavigationCamera(point,snap.bearing,true);
+    followNavigationCamera(displayed,matched?.bearing??snap.bearing,true);
     try{
       navigation.watchId=navigator.geolocation.watchPosition(onNavigationLocation,err=>{
         if(!navigation.active)return;
@@ -1839,8 +2073,14 @@ async function recalculateNavigation(){
     const route=routes[0];
     if(!route?.instructions?.some(i=>i.maneuver!=='depart'))throw new Error('New route has no usable turn instructions.');
     routeOptions=[route];routeSelected=0;routeOrigin={coords:origin,kind:'gps',label:'Current location'};
-    navigation.route=route;navigation.lastProgress=0;navigation.turnIndex=-1;
+    navigation.route=route;navigation.routeIndex=routeGeometryIndex(route.coordinates);
+    navigation.lastProgress=0;navigation.turnIndex=-1;
     navigation.spoken.clear();navigation.offCount=0;navigation.offRoute=false;
+    navigation.matchedAlong=null;navigation.drawnAlong=null;
+    navigation.offSince=0;navigation.onCount=0;navigation.arrivalCount=0;
+    // A new route restarts matching at the latest real GPS point, not the
+    // obsolete last matched point on the previous route.
+    navigation.lastRawFix=null;
     syncRouteLayers();renderRouteCards();
     const pos=navigation.lastPosition;
     if(pos)onNavigationLocation(pos);
@@ -1859,7 +2099,7 @@ $('navEnd').addEventListener('click',()=>endNavigation());
 $('navFollow').addEventListener('click',()=>{
   navigation.follow=true;
   $('navFollow').textContent='Following';
-  if(navigation.lastCoords)followNavigationCamera(navigation.lastCoords,navigation.lastBearing,true);
+  if(navigation.markerPoint)followNavigationCamera(navigation.markerPoint,navigation.lastBearing,true);
 });
 map.on('dragstart',event=>{
   if(navigation.active && event.originalEvent){navigation.follow=false;$('navFollow').textContent='Recenter';}
@@ -1884,7 +2124,7 @@ document.addEventListener('visibilitychange',()=>{
   }else{
     updateNavAlert('Check your position and route after returning to MyArah.');
     map.resize();
-    if(navigation.lastCoords)followNavigationCamera(navigation.lastCoords,navigation.lastBearing,true);
+    if(navigation.markerPoint)followNavigationCamera(navigation.markerPoint,navigation.lastBearing,true);
   }
 });
 window.addEventListener('pagehide',()=>{
