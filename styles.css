@@ -2193,3 +2193,13 @@ body.dark #voiceMenu .myarah-voice-check{color:#9bd8ff;}
     margin: 0;
   }
 }
+
+/* Refractive glass performance pass: isolate the changing lens texture from
+   button content so repainted pixels do not require repainting the icons.
+   Glass appearance, tint, border, highlight and distortion stay unchanged. */
+body[data-myarah-optical="on"] .myarah-optical-lens {
+  contain: paint;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}

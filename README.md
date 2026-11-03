@@ -541,3 +541,15 @@ Aligned the left edge of the speedometer with the existing trip-summary glass pi
 - Uses the actual landscape right safe-area inset, including notched iPhones.
 - Portrait layout, driving navigation HUD, voice popup, routing, the experimental optical glass, and GPS are unchanged.
 - This release modifies only `styles.css` and the stylesheet cache URL in `index.html`.
+
+
+## Smoother Liquid Glass refraction (performance update)
+- Keeps the same convex refractive shape, color fringing, glass shading, and existing map/nav layout.
+- Captures **one scaled map frame** per optical update rather than transferring the WebGL map separately for every glass circle.
+- Caches the lens warping geometry and reusable ImageData until button dimensions change, reducing per-frame CPU work and allocations.
+- Targets approximately 20 updates/second (previously capped at 10); adapts down if sampling is expensive on an iPhone.
+- Queues a final refraction refresh after movement to avoid a stale-looking last glass frame.
+- Pauses when the page is hidden; skips hidden controls.
+- `?glass=off` still disables the experimental refraction and WebGL preserved drawing buffer for a lightweight comparison.
+- Optical refraction still uses canvas readback; WebKit/iPhone GPU performance and battery consumption can vary. This is not native Apple's Liquid Glass.
+- Changed `app.js` (rendering optimization), `styles.css` (lens compositing only), `index.html` (cache refresh), README. Navigation, GPS, ETA, voice and routing functions are untouched.

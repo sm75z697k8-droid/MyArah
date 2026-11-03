@@ -10,121 +10,168 @@ const mapStyle = isDark => `https://tiles.openfreemap.org/styles/${isDark ? 'dar
 const myarahOpticalGlassEnabled = new URLSearchParams(window.location.search).get('glass') !== 'off';
 const map = new maplibregl.Map({container:'map',style:mapStyle(false),center:INITIAL_VIEW.center,zoom:INITIAL_VIEW.zoom,pitch:0,bearing:0,attributionControl:true,canvasContextAttributes:{antialias:true,preserveDrawingBuffer:myarahOpticalGlassEnabled}});
 
-/* EXPERIMENTAL OPTICAL GLASS (PWA / iOS): Actual refractive pixels, not Apple's
-   private native Liquid Glass material. We read small regions of the MapLibre
-   canvas after a render and warp their pixels inside circular controls. A
-   single 2D canvas per visible control is used; no extra WebGL context or
-   network requests. MapLibre's preserveDrawingBuffer is necessary for Safari
-   pixel readback, and can cost GPU memory/performance. ?glass=off disables all
-   optical sampling AND that drawing-buffer cost for A/B testing. If readback
-   fails (e.g. device or browser security restrictions), keep the CSS fallback.
-   Never sample input fields, location/user text, or anything except map pixels. */
+/* OPTIMIZED OPTICAL GLASS (PWA / iOS)
+   Same convex refraction, color separation, transparency and CSS highlights.
+   The previous version read each control directly from the WebGL map and
+   recomputed the distortion for every frame. This version takes ONE scaled
+   map snapshot per update, then samples small areas from that 2D snapshot.
+   Each lens caches its warp lookup and output ImageData until its size changes.
+   Refreshes target ~20 fps (rather than 10), with an adaptive cap when pixel
+   capture is slow. No extra location polling, WebGL contexts or dependencies.
+   ?glass=off still disables sampling and preserveDrawingBuffer for comparison.
+   This is an approximation of iOS Liquid Glass, not Apple's native material. */
 function installMyArahOpticalGlass(mapInstance) {
   if (!myarahOpticalGlassEnabled || typeof document === 'undefined') return;
   const selector = '.map-controls .primary-control, .map-controls .text-control, #north.compass-control, #navFooter .nav-footer-buttons button:not(.nav-end), #navSpeed.nav-speed-gauge';
-  const parentMapCanvas = mapInstance.getCanvas();
+  const mapCanvas = mapInstance.getCanvas();
   const roots = [...document.querySelectorAll(selector)];
   const lenses = roots.map(root => {
     const canvas = document.createElement('canvas');
     canvas.className = 'myarah-optical-lens';
     canvas.setAttribute('aria-hidden', 'true');
     root.appendChild(canvas);
-    const ctx = canvas.getContext('2d', {alpha:true, willReadFrequently:true});
+    const ctx = canvas.getContext('2d', {alpha:true});
     const sample = document.createElement('canvas');
     const sourceCtx = sample.getContext('2d', {alpha:true, willReadFrequently:true});
-    return {root, canvas, ctx, sample, sourceCtx, data:null};
+    return {root,canvas,ctx,sample,sourceCtx,lookup:null,output:null};
   });
-  if (!lenses.length || lenses.some(l=>!l.ctx || !l.sourceCtx)) {
-    for(const l of lenses) l.canvas.remove();
+  if(!lenses.length || lenses.some(l => !l.ctx || !l.sourceCtx)) {
+    for (const lens of lenses) lens.canvas.remove();
     return;
   }
-  const maxDpr = 1.35; // Deliberately lower than display DPI: this is a lens.
-  const pad = 12; // Extra sample pixels for radial distortion near the rim.
-  let lastPaint = -Infinity;
-  let pending = false;
-  let disabled = false;
-  function clearLens() {
+  // One low-resolution WebGL -> 2D transfer instead of multiple GPU readbacks.
+  // At most 1.35 device pixels per CSS pixel: the optics look unchanged, but
+  // we avoid paying to copy the full Retina map at native 3x resolution.
+  const frame = document.createElement('canvas');
+  const frameCtx = frame.getContext('2d', {alpha:true});
+  if(!frameCtx) { for(const lens of lenses)lens.canvas.remove(); return; }
+  const maxDpr = 1.35, pad = 12;
+  let disabled = false, lastPaint = -Infinity, pendingFrame = 0, pendingTimer = 0;
+  let frameInterval = 50; // Aim for 20 optical updates per second when affordable.
+  function clearLens(err) {
     disabled = true;
+    if(pendingFrame) cancelAnimationFrame(pendingFrame);
+    if(pendingTimer) clearTimeout(pendingTimer);
     document.body.removeAttribute('data-myarah-optical');
     for(const lens of lenses) lens.canvas.remove();
+    if(err) console.warn('MyArah refractive glass unavailable; using CSS glass:',err?.message||err);
   }
-  function renderLens(lens, frameCanvas, mapRect) {
-    const {root,canvas,ctx,sample,sourceCtx} = lens;
-    if (root.hidden || root.closest('[hidden]') || getComputedStyle(root).display==='none') return;
-    const rect = root.getBoundingClientRect();
-    if (rect.width<28 || rect.height<28) return;
-    const dpr = Math.min(maxDpr,Math.max(1,window.devicePixelRatio||1));
-    const w=Math.max(1,Math.min(160,Math.round(rect.width*dpr)));
-    const h=Math.max(1,Math.min(160,Math.round(rect.height*dpr)));
+  // Build the exact same convex warp and three-channel chromatic separation
+  // once per size. Per frame we only interpolate sampled pixels, not calculate
+  // radius, sqrt(), bends and color offsets for every output pixel.
+  function rebuildWarp(lens,w,h) {
     const width=w+pad*2,height=h+pad*2;
-    if (canvas.width!==w || canvas.height!==h) { canvas.width=w; canvas.height=h; }
-    if (sample.width!==width || sample.height!==height) {sample.width=width;sample.height=height;}
-    // MapLibres rendered canvas may be at a larger pixel ratio than CSS.
-    const sxScale=frameCanvas.width/mapRect.width;
-    const syScale=frameCanvas.height/mapRect.height;
-    const cssToLensX=rect.width/w,cssToLensY=rect.height/h;
-    const sourceX=((rect.left-mapRect.left)-(pad*cssToLensX))*sxScale;
-    const sourceY=((rect.top-mapRect.top)-(pad*cssToLensY))*syScale;
-    const sourceW=(width*cssToLensX)*sxScale;
-    const sourceH=(height*cssToLensY)*syScale;
-    sourceCtx.clearRect(0,0,width,height);
-    sourceCtx.drawImage(frameCanvas,sourceX,sourceY,sourceW,sourceH,0,0,width,height);
-    const original=sourceCtx.getImageData(0,0,width,height).data;
-    // Ignore transparent/blank frames while the WebGL map is initializing.
-    if (original[(Math.floor(height/2)*width+Math.floor(width/2))*4+3]===0) return;
-    const output=ctx.createImageData(w,h),dest=output.data;
+    lens.canvas.width=w;lens.canvas.height=h;
+    lens.sample.width=width;lens.sample.height=height;
+    const output=lens.ctx.createImageData(w,h);
+    const count=w*h, indices=new Uint32Array(count*3);
+    const fx=new Float32Array(count*3),fy=new Float32Array(count*3);
     const cx=(w-1)/2,cy=(h-1)/2,rx=Math.max(1,cx),ry=Math.max(1,cy);
-    function sampleColor(x,y,component) {
-      x=Math.max(0,Math.min(width-1,x)); y=Math.max(0,Math.min(height-1,y));
-      const x0=Math.floor(x),y0=Math.floor(y);
-      const x1=Math.min(width-1,x0+1),y1=Math.min(height-1,y0+1);
-      const fx=x-x0,fy=y-y0;
-      const i=(y0*width+x0)*4+component;
-      const a=original[i],b=original[(y0*width+x1)*4+component];
-      const c=original[(y1*width+x0)*4+component],d=original[(y1*width+x1)*4+component];
-      return (a+(b-a)*fx)*(1-fy)+(c+(d-c)*fx)*fy;
-    }
     for(let y=0;y<h;y++)for(let x=0;x<w;x++){
       const dx=(x-cx)/rx,dy=(y-cy)/ry;
-      const r=Math.hypot(dx,dy),i=(y*w+x)*4;
-      // Thick convex lens: low distortion centrally, stronger at the edge.
-      const rim=Math.min(1,Math.max(0,(r-.34)/.63));
-      const bend=9*rim*rim;
-      const px=x+pad-dx*bend,py=y+pad-dy*bend;
-      const chroma=.9*rim*rim;
-      dest[i]=sampleColor(px-dx*chroma,py-dy*chroma,0);
-      dest[i+1]=sampleColor(px,py,1);
-      dest[i+2]=sampleColor(px+dx*chroma,py+dy*chroma,2);
-      // Leave highlights, shadows, and icons legible above the live map.
-      dest[i+3]=Math.round(205+36*rim);
+      const rim=Math.min(1,Math.max(0,(Math.hypot(dx,dy)-.34)/.63));
+      const rimSquared=rim*rim,bend=9*rimSquared,chroma=.9*rimSquared;
+      const baseX=x+pad-dx*bend,baseY=y+pad-dy*bend;
+      const p=(y*w+x),offset=p*3;
+      for(let c=0;c<3;c++){
+        const shift=(c-1)*chroma;
+        const px=Math.max(0,Math.min(width-1.001,baseX+dx*shift));
+        const py=Math.max(0,Math.min(height-1.001,baseY+dy*shift));
+        const x0=Math.floor(px),y0=Math.floor(py);
+        indices[offset+c]=(y0*width+x0)*4+c;
+        fx[offset+c]=px-x0;
+        fy[offset+c]=py-y0;
+      }
+      output.data[p*4+3]=Math.round(205+36*rim);
     }
-    ctx.putImageData(output,0,0);
+    lens.lookup={w,h,width,height,indices,fx,fy,rowBytes:width*4};
+    lens.output=output;
+  }
+  function visibleRect(lens) {
+    const {root}=lens;
+    if(root.hidden || root.closest('[hidden]') || getComputedStyle(root).display==='none')return null;
+    const rect=root.getBoundingClientRect();
+    if(rect.width<28 || rect.height<28)return null;
+    // Ignore controls outside the viewport, including the hidden bottom sheet.
+    if(rect.right<0 || rect.bottom<0 || rect.left>innerWidth || rect.top>innerHeight)return null;
+    return rect;
+  }
+  function paintLens(lens,rect,mapRect){
+    const dpr=Math.min(maxDpr,Math.max(1,window.devicePixelRatio||1));
+    const w=Math.max(1,Math.min(160,Math.round(rect.width*dpr)));
+    const h=Math.max(1,Math.min(160,Math.round(rect.height*dpr)));
+    if(!lens.lookup || lens.lookup.w!==w || lens.lookup.h!==h)rebuildWarp(lens,w,h);
+    const {width,height,indices,fx,fy,rowBytes}=lens.lookup;
+    const cssToLensX=rect.width/w,cssToLensY=rect.height/h;
+    const sxScale=frame.width/mapRect.width,syScale=frame.height/mapRect.height;
+    const sourceX=(rect.left-mapRect.left-pad*cssToLensX)*sxScale;
+    const sourceY=(rect.top-mapRect.top-pad*cssToLensY)*syScale;
+    const sourceW=width*cssToLensX*sxScale,sourceH=height*cssToLensY*syScale;
+    lens.sourceCtx.clearRect(0,0,width,height);
+    lens.sourceCtx.drawImage(frame,sourceX,sourceY,sourceW,sourceH,0,0,width,height);
+    const original=lens.sourceCtx.getImageData(0,0,width,height).data;
+    if(original[(Math.floor(height/2)*width+Math.floor(width/2))*4+3]===0)return;
+    const dest=lens.output.data;
+    // Three bilinear samples per pixel, with a precomputed coordinate table.
+    for(let p=0,idx=0;p<w*h;p++,idx+=3){
+      const o=p*4;
+      for(let c=0;c<3;c++){
+        const k=idx+c,i=indices[k],x=fx[k],y=fy[k];
+        const upper=original[i]+(original[i+4]-original[i])*x;
+        const lower=original[i+rowBytes]+(original[i+rowBytes+4]-original[i+rowBytes])*x;
+        dest[o+c]=upper+(lower-upper)*y;
+      }
+    }
+    lens.ctx.putImageData(lens.output,0,0);
   }
   function draw() {
-    pending=false;
-    if(disabled || document.hidden || !parentMapCanvas.width || !parentMapCanvas.height) return;
-    const mapRect=parentMapCanvas.getBoundingClientRect();
-    if(!mapRect.width || !mapRect.height)return;
-    try { for(const lens of lenses) renderLens(lens,parentMapCanvas,mapRect); }
-    catch(err) {
-      console.warn('MyArah experimental refractive glass unavailable; using CSS glass:',err?.message||err);
-      clearLens();
-    }
+    pendingFrame=0;
+    if(disabled||document.hidden||!mapCanvas.width||!mapCanvas.height)return;
+    const started=performance.now();
+    try {
+      const mapRect=mapCanvas.getBoundingClientRect();
+      if(!mapRect.width||!mapRect.height)return;
+      const visible=lenses.map(l=>({lens:l,rect:visibleRect(l)})).filter(item=>item.rect);
+      if(!visible.length)return;
+      const scale=Math.min(maxDpr,Math.max(1,window.devicePixelRatio||1),1800/Math.max(mapRect.width,mapRect.height));
+      const fw=Math.max(1,Math.round(mapRect.width*scale));
+      const fh=Math.max(1,Math.round(mapRect.height*scale));
+      if(frame.width!==fw||frame.height!==fh){frame.width=fw;frame.height=fh;}
+      frameCtx.clearRect(0,0,fw,fh);
+      frameCtx.drawImage(mapCanvas,0,0,fw,fh);
+      for(const item of visible)paintLens(item.lens,item.rect,mapRect);
+      lastPaint=performance.now();
+      const cost=lastPaint-started;
+      // An older iPhone may need fewer optical updates to keep the map fluid.
+      // Use real execution cost rather than a fixed device-model guess.
+      const desired=cost>26?Math.min(110,cost*3):cost>15?65:50;
+      frameInterval=Math.max(50,Math.min(110,frameInterval*.75+desired*.25));
+    } catch(err) { clearLens(err); }
   }
   function schedule() {
-    if(disabled || pending || document.hidden)return;
-    const now=performance.now();
-    if(now-lastPaint<100) return; // At most 10 samples/s; preserve navigation FPS.
-    lastPaint=now;pending=true;
-    requestAnimationFrame(draw);
+    if(disabled||document.hidden||pendingFrame||pendingTimer)return;
+    const wait=Math.max(0,lastPaint+frameInterval-performance.now());
+    if(wait<1){pendingFrame=requestAnimationFrame(draw);return;}
+    // A trailing draw is essential: otherwise the final map frame can be
+    // dropped by throttling and the glass looks one step behind after pan/zoom.
+    pendingTimer=setTimeout(()=>{
+      pendingTimer=0;
+      if(!disabled && !document.hidden && !pendingFrame)pendingFrame=requestAnimationFrame(draw);
+    },Math.ceil(wait));
   }
   document.body.setAttribute('data-myarah-optical','on');
   mapInstance.on('render',schedule);
   mapInstance.on('resize',schedule);
   mapInstance.on('idle',schedule);
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)schedule();});
-  window.addEventListener('resize',schedule,{passive:true});
-  // Initial map paint and iOS Home Screen resume will render the lenses.
+  mapInstance.on('moveend',schedule);
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden){
+      if(pendingFrame)cancelAnimationFrame(pendingFrame);
+      if(pendingTimer)clearTimeout(pendingTimer);
+      pendingFrame=0;pendingTimer=0;
+    } else {lastPaint=-Infinity;schedule();}
+  });
+  window.addEventListener('resize',()=>{lastPaint=-Infinity;schedule();},{passive:true});
   schedule();
 }
 installMyArahOpticalGlass(map);
