@@ -1530,6 +1530,8 @@ const navigation = {
   active:false, watchId:null, destinationId:null, route:null,
   lastCoords:null, lastUpdate:0, lastCamera:0, lastProgress:0,
   lastBearing:null, markerAnimation:0, markerPoint:null,
+  // The camera follows the marker's *displayed* position, not raw GPS jumps.
+  cameraState:null, cameraFrame:0,
   follow:true, voiced:false, spoken:new Set(), turnIndex:-1,
   // Guidance announcements are relative to movement, not fixed road distances.
   // Keep timing state separate from GPS/map smoothing and reset it on reroute.
@@ -1856,29 +1858,145 @@ function animateNavigationMarker(coords,along=null,elapsedMs=1000){
   navigation.markerAnimation=requestAnimationFrame(animate);
 }
 
+// Navigation camera refinement. All map movement still uses MapLibre's
+// existing camera API; no extra map layers, UI, services or route requests.
+const NAV_CAMERA_FRAME_MS=48; // cap navigation camera updates around 20fps on phones
+const NAV_CAMERA_EASE_MS=640;
+const navCameraClamp=(value,low,high)=>Math.max(low,Math.min(high,value));
+
+function navigationCameraFraming(){
+  const appRect=appRoot.getBoundingClientRect();
+  const width=Math.max(1,appRect.width), height=Math.max(1,appRect.height);
+  const landscape=width>height && height<=560;
+  let x=width/2, y=height*.65;
+  if(landscape){
+    // The maneuver panel occupies the upper-left in landscape, while the
+    // circular driving controls occupy the lower center. Keep the GPS dot in
+    // the clear space on the right instead of underneath either panel.
+    const hudRight=!navHud.hidden ? navHud.getBoundingClientRect().right-appRect.left : width*.4;
+    x=navCameraClamp(Math.max(width*.62,(hudRight+width)*.5),width*.54,width-64);
+    y=navCameraClamp(height*.59,height*.44,Math.max(height*.44,height-124));
+  }else{
+    // In portrait, put the blue dot below center, leaving useful road ahead
+    // between the instruction card and the location indicator.
+    const hudBottom=!navHud.hidden ? navHud.getBoundingClientRect().bottom-appRect.top : height*.18;
+    const footerTop=!navFooter.hidden ? navFooter.getBoundingClientRect().top-appRect.top : height*.82;
+    const freeTop=navCameraClamp(hudBottom+12,0,height*.72);
+    const freeBottom=navCameraClamp(footerTop-16,freeTop+1,height);
+    y=navCameraClamp(freeTop+(freeBottom-freeTop)*.72,height*.49,height*.78);
+  }
+  return {landscape, offset:[Math.round(x-width/2),Math.round(y-height/2)]};
+}
+function navigationCameraPerspective(landscape){
+  // Widen the driving view progressively with speed. Unknown/parked speed
+  // stays closer and flatter; don't oscillate zoom from single noisy fixes.
+  const speed=Number.isFinite(navigation.guidanceSpeed) ? navigation.guidanceSpeed :
+    (Number.isFinite(navigation.lastRawFix?.speed) ? navigation.lastRawFix.speed : 4);
+  const moving=navCameraClamp((speed-2)/25,0,1);
+  return {
+    zoom:(landscape?16.65:16.85)-(landscape?.75:.72)*moving,
+    pitch:(landscape?45:49)+(landscape?3:5)*moving
+  };
+}
+function stopNavigationCamera(){
+  if(navigation.cameraFrame)cancelAnimationFrame(navigation.cameraFrame);
+  navigation.cameraFrame=0;
+  navigation.cameraState=null;
+}
+function navigationCameraTick(time){
+  navigation.cameraFrame=0;
+  const state=navigation.cameraState;
+  if(!state || !navigation.active || !navigation.follow || document.hidden)return;
+  if(time<state.holdUntil){
+    navigation.cameraFrame=requestAnimationFrame(navigationCameraTick);
+    return;
+  }
+  if(state.syncAfterEase){
+    // The initial recenter animation finishes before live tracking starts.
+    state.bearing=normalizedHeading(map.getBearing());
+    state.zoom=map.getZoom();
+    state.pitch=map.getPitch();
+    state.offset=[...state.targetOffset];
+    state.syncAfterEase=false;
+    state.lastTime=0;
+  }
+  if(state.lastTime && time-state.lastTime<NAV_CAMERA_FRAME_MS){
+    navigation.cameraFrame=requestAnimationFrame(navigationCameraTick);
+    return;
+  }
+  const elapsed=state.lastTime ? navCameraClamp(time-state.lastTime,16,170) : NAV_CAMERA_FRAME_MS;
+  state.lastTime=time;
+  const ms=reducedMotion?1:elapsed;
+  const rotateBlend=reducedMotion?1:1-Math.exp(-ms/660);
+  const lensBlend=reducedMotion?1:1-Math.exp(-ms/1800);
+  const offsetBlend=reducedMotion?1:1-Math.exp(-ms/380);
+  state.bearing=normalizedHeading(state.bearing+
+    smallestAngle(state.targetBearing-state.bearing)*rotateBlend);
+  state.zoom+=(state.targetZoom-state.zoom)*lensBlend;
+  state.pitch+=(state.targetPitch-state.pitch)*lensBlend;
+  state.offset=state.offset.map((value,i)=>value+(state.targetOffset[i]-value)*offsetBlend);
+  // Marker animation and camera now share the *same rendered location*.
+  const marker=navigation.markerPoint;
+  const moved=marker && state.lastPoint ? haversineMeters(marker,state.lastPoint) : Infinity;
+  const rotating=Math.abs(smallestAngle(state.targetBearing-state.bearing));
+  const settling=rotating>.7 || Math.abs(state.zoom-state.targetZoom)>.018 ||
+    Math.abs(state.pitch-state.targetPitch)>.20 ||
+    state.offset.some((value,i)=>Math.abs(value-state.targetOffset[i])>.8);
+  const travelling=!!navigation.markerAnimation;
+  // Avoid repeatedly redrawing the map while parked or on noisy 1m fixes.
+  if(marker && (moved>1 || !state.lastPoint || settling || travelling)){
+    map.easeTo({
+      center:marker,
+      zoom:state.zoom,pitch:state.pitch,bearing:state.bearing,
+      offset:state.offset, duration:0,animate:false
+    });
+    state.lastPoint=[...marker];
+  }
+  if(travelling || settling || moved>1){
+    navigation.cameraFrame=requestAnimationFrame(navigationCameraTick);
+  }
+}
+function scheduleNavigationCamera(){
+  if(!navigation.cameraFrame){
+    navigation.cameraFrame=requestAnimationFrame(navigationCameraTick);
+  }
+}
 function followNavigationCamera(coords,bearing,force=false){
   if(!navigation.follow || !navigation.active || document.hidden || !coords)return;
+  const {landscape,offset}=navigationCameraFraming();
+  const {zoom,pitch}=navigationCameraPerspective(landscape);
+  const angle=Number.isFinite(bearing) ? normalizedHeading(bearing) :
+    (navigation.cameraState?.targetBearing ?? navigation.lastBearing ?? map.getBearing());
   const now=performance.now();
-  const since=now-navigation.lastCamera;
-  if(!force && since<470) return;
-  const angle=Number.isFinite(bearing)?bearing:(navigation.lastBearing??map.getBearing());
-  const distance=navigation.lastCameraPoint?haversineMeters(coords,navigation.lastCameraPoint):Infinity;
-  const turn=navigation.lastCameraBearing===null?Infinity:
-    Math.abs(smallestAngle(angle-navigation.lastCameraBearing));
-  // Avoid repeated animations to the same center while parked, but allow a
-  // periodic resync when iOS reports a resized viewport.
-  if(!force && distance<2.5 && turn<4 && since<2800) return;
+  let state=navigation.cameraState;
+  if(!state){
+    state=navigation.cameraState={
+      bearing:normalizedHeading(map.getBearing()),zoom:map.getZoom(),pitch:map.getPitch(),
+      offset:[...offset],targetOffset:[...offset],targetBearing:angle,
+      targetZoom:zoom,targetPitch:pitch,holdUntil:0,syncAfterEase:false,
+      lastTime:0,lastPoint:null
+    };
+    force=true;
+  }
+  const rect=appRoot.getBoundingClientRect();
+  state.size=[rect.width,rect.height];
+  state.targetBearing=angle;
+  state.targetZoom=zoom;
+  state.targetPitch=pitch;
+  state.targetOffset=offset;
   navigation.lastCamera=now;
   navigation.lastCameraPoint=[...coords];
   navigation.lastCameraBearing=angle;
-  navigation.lastBearing=angle;
-  const height=appRoot.getBoundingClientRect().height;
-  map.easeTo({
-    center:coords, zoom:16.8, pitch:53, bearing:angle,
-    offset:[0,Math.round(height*.16)],
-    duration:reducedMotion?0:Math.min(850,Math.max(480,since*.86)),
-    easing:cameraEase, essential:true
-  });
+  if(force){
+    // On Start, Recenter or rotation, offer one calm transition into driving
+    // perspective. Subsequent GPS fixes never restart this animation.
+    state.holdUntil=now+(reducedMotion?0:NAV_CAMERA_EASE_MS);
+    state.syncAfterEase=true;
+    map.easeTo({center:navigation.markerPoint||coords,zoom,pitch,bearing:angle,
+      offset,duration:reducedMotion?0:NAV_CAMERA_EASE_MS,
+      easing:cameraEase,essential:!reducedMotion});
+  }
+  scheduleNavigationCamera();
 }
 
 // Calm, concise guidance using voices available on this iPhone/browser.
@@ -2364,6 +2482,7 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   navigation.eta=null;
   cancelAnimationFrame(navigation.markerAnimation);
   navigation.markerAnimation=0;
+  stopNavigationCamera();
   if(!finishAnnouncement && 'speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
   navHud.hidden=true;navFooter.hidden=true;
   appRoot.classList.remove('navigation-active');
@@ -2431,6 +2550,7 @@ function startNavigation(){
     });
     const matched=initial?.valid?initial:null;
     const displayed=matched?.coords||point;
+    stopNavigationCamera();
     Object.assign(navigation,{
       active:true,destinationId,route,lastCoords:point,routeIndex:index,
       lastProgress:Math.max(0,(matched?.along/index.total??snap.fraction)*route.meters),
@@ -2616,7 +2736,7 @@ $('navFollow').addEventListener('click',()=>{
   if(navigation.markerPoint)followNavigationCamera(navigation.markerPoint,navigation.lastBearing,true);
 });
 map.on('dragstart',event=>{
-  if(navigation.active && event.originalEvent){navigation.follow=false;setNavFollowState(false);}
+  if(navigation.active && event.originalEvent){navigation.follow=false;stopNavigationCamera();setNavFollowState(false);}
 });
 $('navReroute').addEventListener('click',()=>void recalculateNavigation());
 $('navSound').addEventListener('click',()=>{
@@ -2653,6 +2773,28 @@ document.addEventListener('visibilitychange',()=>{
     refreshNavTrip();
     map.resize();
     if(navigation.markerPoint)followNavigationCamera(navigation.markerPoint,navigation.lastBearing,true);
+  }
+});
+// iOS may deliver a late orientation resize after the initial rotate event.
+// Refresh only the framing, not the route or destination, and only when Follow is on.
+let navigationCameraResizeTimer=null;
+function resyncNavigationCameraLayout(){
+  if(navigationCameraResizeTimer!==null)clearTimeout(navigationCameraResizeTimer);
+  navigationCameraResizeTimer=setTimeout(()=>{
+    navigationCameraResizeTimer=null;
+    if(navigation.active && navigation.follow && !document.hidden && navigation.markerPoint){
+      map.resize();
+      followNavigationCamera(navigation.markerPoint,navigation.lastBearing,true);
+    }
+  },300);
+}
+window.addEventListener('orientationchange',resyncNavigationCameraLayout);
+window.addEventListener('resize',()=>{
+  if(navigation.active && navigation.follow && !document.hidden){
+    const size=navigation.cameraState?.size;
+    const rect=appRoot.getBoundingClientRect();
+    if(!size || Math.abs(size[0]-rect.width)>24 || Math.abs(size[1]-rect.height)>24)
+      resyncNavigationCameraLayout();
   }
 });
 window.addEventListener('pagehide',()=>{

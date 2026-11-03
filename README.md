@@ -403,3 +403,15 @@ The embedded vector icon artwork is derived from Lucide Icons (https://lucide.de
 4. Switch away/return and end navigation while routing is in progress; no stale route should replace the trip.
 
 Your TomTom key is still entered on your device and is not bundled in the ZIP.
+
+
+## Navigation camera refinement (MyArah Camera v1)
+- The camera now tracks the **displayed blue GPS marker** rather than easing ahead of it toward each newest GPS fix.
+- Heading settles around bends using the shortest rotation; it won't turn in circles while parked.
+- Speed adjusts viewing distance gently: slower movement shows more detail, faster driving shows more road ahead. This is a camera-only change, not speed-limit guidance.
+- Landscape framing shifts the location indicator into visible map space to the right of the turn banner and above the floating round controls; portrait positioning leaves room above the marker for the road ahead.
+- Updates are limited to approximately 20 camera updates per second and stop when the marker and camera are settled, reducing unnecessary work on iPhones.
+- Starting navigation, Recenter and rotation use a short camera transition; manual dragging pauses follow until Recenter is tapped. Reduced Motion is honored.
+- No changes to TomTom API usage, GPS matching, ETA, traffic, arrival detection, UI layout, or routing instructions.
+- Update the repository's `app.js` and `index.html` only. `styles.css` is byte-for-byte unchanged.
+- Test while stationary or as a passenger first; this is an iterative browser navigation prototype and is not validated for driving safety.
