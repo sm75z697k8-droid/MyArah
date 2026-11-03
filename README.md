@@ -533,3 +533,11 @@ Aligned the left edge of the speedometer with the existing trip-summary glass pi
 - Voice selection prefers better-quality voices when they are returned by the browser; the speech rate is now 0.98 rather than an unnaturally slow 0.88.
 - **WebKit limitation:** Safari's Web Speech API may not expose downloaded Enhanced/Premium/Siri voices. The result cannot be guaranteed to sound like a natural AI voice. A cloud neural TTS service would require a secure server-side proxy for credentials, network access, usage costs and driving latency safeguards; no API key is embedded in this static project.
 - iPhone may refuse speech that starts outside a user interaction or when the app is backgrounded. Selecting voice guidance does not override iOS audio policy.
+
+
+## Landscape map-control alignment
+- The Appearance (light/dark) button now sits immediately to the left of Traffic at the top-right, rather than drifting toward the middle of the map on wide iPhone landscape viewports.
+- The Traffic, GPS, 3D, and Compass buttons share a common centre line, with their existing visuals and functions preserved.
+- Uses the actual landscape right safe-area inset, including notched iPhones.
+- Portrait layout, driving navigation HUD, voice popup, routing, the experimental optical glass, and GPS are unchanged.
+- This release modifies only `styles.css` and the stylesheet cache URL in `index.html`.

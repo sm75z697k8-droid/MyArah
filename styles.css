@@ -2155,3 +2155,41 @@ body.dark #voiceMenu .myarah-voice-check{color:#9bd8ff;}
   #voiceMenu.closing .myarah-voice-dialog,#voiceMenu.closing .myarah-voice-scrim{animation:none!important;}
   #voiceMenu .myarah-voice-choice{transition:none!important;}
 }
+
+
+/* === MyArah map-control alignment: landscape only =========================
+   The wide-layout header used max-width:480px and left:22px, so the appearance
+   button drifted toward the middle while Traffic/GPS/3D/Compass stayed right.
+   Place the appearance button beside Traffic, matching its vertical centre;
+   keep all right-column controls on one shared optical centre line.
+   No change to portrait placement or navigation's own HUD. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .app {
+    --myarah-control-right: max(12px, env(safe-area-inset-right, 0px));
+  }
+  .app:not(.navigation-active) .map-controls {
+    right: var(--myarah-control-right);
+    width: 58px;
+    justify-items: center;
+  }
+  .app:not(.navigation-active) .topbar {
+    /* In the same top row, a comfortable gap left of the Traffic control. */
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + 10px);
+    left: auto;
+    right: calc(var(--myarah-control-right) + 73px);
+    bottom: auto;
+    max-width: none;
+    width: 52px;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    justify-content: center;
+  }
+  .app:not(.navigation-active) .topbar .theme-toggle {
+    width: 52px;
+    height: 52px;
+    min-width: 52px;
+    margin: 0;
+  }
+}
