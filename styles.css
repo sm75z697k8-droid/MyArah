@@ -1923,3 +1923,82 @@ body.dark #navSpeed[data-available='false'] .nav-speed-number{color:#9fb4c9;}
 @media (prefers-reduced-motion:reduce){
   #navSpeed.nav-speed-gauge{transition:none;}
 }
+
+
+/* ===== Experimental live-map refractive Liquid Glass =====
+   The small optical canvases actually warp pixels from the MapLibre map.
+   The existing frosted-glass styles remain if readback is unavailable or
+   disabled by the comparison URL ?glass=off. This is NOT native iOS glass.
+   The End button stays solid red; traffic controls remain untouched.
+   ================================================================== */
+body[data-myarah-optical="on"] .map-controls .primary-control,
+body[data-myarah-optical="on"] .map-controls .text-control,
+body[data-myarah-optical="on"] #north.compass-control,
+body[data-myarah-optical="on"] #navFooter .nav-footer-buttons button:not(.nav-end),
+body[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  background:linear-gradient(145deg,rgba(255,255,255,.40),rgba(205,226,246,.30) 70%,rgba(152,195,233,.24));
+  border:1.5px solid rgba(255,255,255,.92);
+  -webkit-backdrop-filter:blur(2px) saturate(1.35);
+  backdrop-filter:blur(2px) saturate(1.35);
+  box-shadow:0 8px 23px rgba(22,48,74,.25),
+    inset 0 2px 1.5px rgba(255,255,255,.97),
+    inset -2px -2px 2px rgba(79,125,161,.22),
+    0 0 0 .5px rgba(60,113,167,.18);
+}
+body.dark[data-myarah-optical="on"] .map-controls .primary-control,
+body.dark[data-myarah-optical="on"] .map-controls .text-control,
+body.dark[data-myarah-optical="on"] #north.compass-control,
+body.dark[data-myarah-optical="on"] #navFooter .nav-footer-buttons button:not(.nav-end),
+body.dark[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
+  background:linear-gradient(148deg,rgba(82,119,156,.47),rgba(28,52,79,.37) 76%,rgba(13,33,54,.47));
+  border-color:rgba(187,219,250,.66);
+  box-shadow:0 8px 23px rgba(0,6,19,.50),
+    inset 0 2px 1.5px rgba(233,246,255,.48),
+    inset -2px -2px 2px rgba(3,16,36,.30);
+}
+body[data-myarah-optical="on"] .myarah-optical-lens {
+  position:absolute;left:0;top:0;width:100%;height:100%;
+  display:block;pointer-events:none;z-index:0;border-radius:inherit;
+  mix-blend-mode:normal;
+}
+body[data-myarah-optical="on"] .map-controls .primary-control > svg,
+body[data-myarah-optical="on"] .map-controls .text-control > svg,
+body[data-myarah-optical="on"] .map-controls .text-control > .myarah-glass-label,
+body[data-myarah-optical="on"] #north .compass-dial,
+body[data-myarah-optical="on"] #navFooter .nav-action-icon,
+body[data-myarah-optical="on"] #navFooter .nav-btn-label,
+body[data-myarah-optical="on"] #navSpeed .nav-speed-number,
+body[data-myarah-optical="on"] #navSpeed .nav-speed-unit {
+  position:relative;z-index:2;
+}
+/* Reflective lip and traveling-light glint, above the refracted pixels. */
+body[data-myarah-optical="on"] #navFooter .nav-footer-buttons button:not(.nav-end)::before,
+body[data-myarah-optical="on"] #navSpeed.nav-speed-gauge::before {
+  z-index:1;inset:1px;
+  background:radial-gradient(ellipse 96% 47% at 27% 0%,rgba(255,255,255,.66),transparent 88%),
+    radial-gradient(ellipse 66% 45% at 102% 100%,rgba(140,185,229,.30),transparent 90%);
+  box-shadow:inset 0 1.5px 1px rgba(255,255,255,.62),
+    inset 0 -1.5px 1px rgba(75,123,166,.21);
+}
+/* Preserve contrast for active controls; icon colors remain unchanged. */
+body[data-myarah-optical="on"] #navFooter #navSound[aria-pressed="true"],
+body[data-myarah-optical="on"] #navFooter #navFollow[data-following="true"] {
+  box-shadow:0 8px 23px rgba(23,70,115,.27),0 0 0 1px rgba(35,133,220,.65),
+    inset 0 2px 1.5px rgba(255,255,255,.90);
+}
+@media(prefers-contrast:more){
+  body[data-myarah-optical="on"] .myarah-optical-lens {opacity:.38;}
+  body[data-myarah-optical="on"] #navSpeed.nav-speed-gauge,
+  body[data-myarah-optical="on"] #navFooter .nav-footer-buttons button:not(.nav-end) {
+    background:rgba(249,253,255,.90);
+  }
+  body.dark[data-myarah-optical="on"] #navSpeed.nav-speed-gauge,
+  body.dark[data-myarah-optical="on"] #navFooter .nav-footer-buttons button:not(.nav-end) {
+    background:rgba(19,37,57,.94);
+  }
+}
+
+.myarah-glass-label{position:relative;z-index:2;pointer-events:none;}

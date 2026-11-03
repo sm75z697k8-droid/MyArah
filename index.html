@@ -11,8 +11,8 @@
   <title>MyArah — Explore Malaysia</title>
   <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=myarah-speed-glass-1">
-  <script type="module" src="app.js?v=myarah-speed-glass-1"></script>
+  <link rel="stylesheet" href="styles.css?v=myarah-optical-glass-1">
+  <script type="module" src="app.js?v=myarah-optical-glass-1"></script>
 </head>
 <body>
   <main class="app" aria-label="MyArah map">
@@ -27,7 +27,7 @@
     <div class="map-controls">
       <button id="trafficToggle" class="control surface traffic-control" type="button" aria-label="Turn on live traffic" aria-pressed="false" title="Live traffic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16M4 12h16M4 17.5h16"/><path class="traffic-mini-green" d="M4 6.5h7"/><path class="traffic-mini-yellow" d="M12 12h8"/><path class="traffic-mini-red" d="M4 17.5h11"/></svg></button>
       <button id="locate" class="control surface primary-control" aria-label="Show my location" title="My location"><svg viewBox="0 0 24 24"><path d="m12 3-7.5 17L12 16l7.5 4L12 3Z"/></svg></button>
-      <button id="tilt" class="control surface text-control" aria-label="Switch to 3D map" aria-pressed="false" title="2D / 3D map">3D</button>
+      <button id="tilt" class="control surface text-control" aria-label="Switch to 3D map" aria-pressed="false" title="2D / 3D map"><span class="myarah-glass-label">3D</span></button>
       <button id="north" class="control compass-control" type="button" aria-label="Map points North. Tap to reset the map north." title="Reset map north">
           <span class="compass-dial" aria-hidden="true">
             <svg id="compassRose" class="compass-rose" viewBox="0 0 64 64">

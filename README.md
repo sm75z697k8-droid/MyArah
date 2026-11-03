@@ -481,3 +481,29 @@ The SVGs are embedded in `index.html`/`app.js` and require no external download 
 - Both light and dark modes retain high-contrast icons and labels, including visible pressed/active state. Reduced Motion and Increase Contrast are respected where supported.
 - **Limit:** native Apple Liquid Glass uses live optical refraction not available as a generic CSS effect over an animated MapLibre canvas on iOS Safari. This uses a lightweight visual approximation rather than a WebGL effect that could harm navigation performance.
 - Files to replace in GitHub: `index.html`, `styles.css`, `app.js` and (optionally) `README.md`. The versioned URLs in `index.html` help clear iPhone caches.
+
+
+## Experimental optical Liquid Glass (iPhone performance test)
+
+This version deliberately tries **live refractive glass** for MyArah's small circular
+map/navigation controls and speedometer. A WebGL MapLibre frame is sampled and
+warped in small 2D canvases, producing **actual pixel displacement** (minor color
+separation near the edges) rather than only blur. It is an experimental web
+simulation — **not Apple's native SwiftUI/UIKit Liquid Glass**. That native
+material is not exposed to GitHub Pages / ordinary web apps.
+
+- **Test on:** open the normal MyArah URL; the experimental effect is on by default.
+- **Compare / disable:** append `?glass=off` to your GitHub Pages URL and reload.
+  This turns OFF the lens rendering **and** MapLibre's extra drawing-buffer
+  preservation; you get the previous efficient CSS layered-glass appearance.
+- No new visible buttons or settings. Existing GPS, traffic, speed detection,
+  navigation and routing logic remains unchanged.
+- Lens sampling is limited to 10 updates/second and small circles. The route
+  text panels keep strong backgrounds for readability; the red End button is
+  intentionally not transparent. Traffic styling remains unchanged.
+- **Possible costs:** more GPU memory, heat, battery use, or lower frame rate on
+  iPhone. Safari or device policies may disallow map-pixel capture; then the
+  lens automatically falls back to the previous glass and logs a warning.
+- Test while parked or as a passenger, particularly camera movement and
+  scrolling, and compare `?glass=off`. The extra GPU work may not be worth
+  the effect; the faster version is always available.

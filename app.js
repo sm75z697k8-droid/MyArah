@@ -7,7 +7,128 @@ const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matc
 // CARTO now requires a key; use OpenFreeMap styles without an API key.
 // Light and dark use the same map engine and preserve the existing UI.
 const mapStyle = isDark => `https://tiles.openfreemap.org/styles/${isDark ? 'dark' : 'positron'}`;
-const map = new maplibregl.Map({container:'map',style:mapStyle(false),center:INITIAL_VIEW.center,zoom:INITIAL_VIEW.zoom,pitch:0,bearing:0,attributionControl:true,canvasContextAttributes:{antialias:true}});
+const myarahOpticalGlassEnabled = new URLSearchParams(window.location.search).get('glass') !== 'off';
+const map = new maplibregl.Map({container:'map',style:mapStyle(false),center:INITIAL_VIEW.center,zoom:INITIAL_VIEW.zoom,pitch:0,bearing:0,attributionControl:true,canvasContextAttributes:{antialias:true,preserveDrawingBuffer:myarahOpticalGlassEnabled}});
+
+/* EXPERIMENTAL OPTICAL GLASS (PWA / iOS): Actual refractive pixels, not Apple's
+   private native Liquid Glass material. We read small regions of the MapLibre
+   canvas after a render and warp their pixels inside circular controls. A
+   single 2D canvas per visible control is used; no extra WebGL context or
+   network requests. MapLibre's preserveDrawingBuffer is necessary for Safari
+   pixel readback, and can cost GPU memory/performance. ?glass=off disables all
+   optical sampling AND that drawing-buffer cost for A/B testing. If readback
+   fails (e.g. device or browser security restrictions), keep the CSS fallback.
+   Never sample input fields, location/user text, or anything except map pixels. */
+function installMyArahOpticalGlass(mapInstance) {
+  if (!myarahOpticalGlassEnabled || typeof document === 'undefined') return;
+  const selector = '.map-controls .primary-control, .map-controls .text-control, #north.compass-control, #navFooter .nav-footer-buttons button:not(.nav-end), #navSpeed.nav-speed-gauge';
+  const parentMapCanvas = mapInstance.getCanvas();
+  const roots = [...document.querySelectorAll(selector)];
+  const lenses = roots.map(root => {
+    const canvas = document.createElement('canvas');
+    canvas.className = 'myarah-optical-lens';
+    canvas.setAttribute('aria-hidden', 'true');
+    root.appendChild(canvas);
+    const ctx = canvas.getContext('2d', {alpha:true, willReadFrequently:true});
+    const sample = document.createElement('canvas');
+    const sourceCtx = sample.getContext('2d', {alpha:true, willReadFrequently:true});
+    return {root, canvas, ctx, sample, sourceCtx, data:null};
+  });
+  if (!lenses.length || lenses.some(l=>!l.ctx || !l.sourceCtx)) {
+    for(const l of lenses) l.canvas.remove();
+    return;
+  }
+  const maxDpr = 1.35; // Deliberately lower than display DPI: this is a lens.
+  const pad = 12; // Extra sample pixels for radial distortion near the rim.
+  let lastPaint = -Infinity;
+  let pending = false;
+  let disabled = false;
+  function clearLens() {
+    disabled = true;
+    document.body.removeAttribute('data-myarah-optical');
+    for(const lens of lenses) lens.canvas.remove();
+  }
+  function renderLens(lens, frameCanvas, mapRect) {
+    const {root,canvas,ctx,sample,sourceCtx} = lens;
+    if (root.hidden || root.closest('[hidden]') || getComputedStyle(root).display==='none') return;
+    const rect = root.getBoundingClientRect();
+    if (rect.width<28 || rect.height<28) return;
+    const dpr = Math.min(maxDpr,Math.max(1,window.devicePixelRatio||1));
+    const w=Math.max(1,Math.min(160,Math.round(rect.width*dpr)));
+    const h=Math.max(1,Math.min(160,Math.round(rect.height*dpr)));
+    const width=w+pad*2,height=h+pad*2;
+    if (canvas.width!==w || canvas.height!==h) { canvas.width=w; canvas.height=h; }
+    if (sample.width!==width || sample.height!==height) {sample.width=width;sample.height=height;}
+    // MapLibres rendered canvas may be at a larger pixel ratio than CSS.
+    const sxScale=frameCanvas.width/mapRect.width;
+    const syScale=frameCanvas.height/mapRect.height;
+    const cssToLensX=rect.width/w,cssToLensY=rect.height/h;
+    const sourceX=((rect.left-mapRect.left)-(pad*cssToLensX))*sxScale;
+    const sourceY=((rect.top-mapRect.top)-(pad*cssToLensY))*syScale;
+    const sourceW=(width*cssToLensX)*sxScale;
+    const sourceH=(height*cssToLensY)*syScale;
+    sourceCtx.clearRect(0,0,width,height);
+    sourceCtx.drawImage(frameCanvas,sourceX,sourceY,sourceW,sourceH,0,0,width,height);
+    const original=sourceCtx.getImageData(0,0,width,height).data;
+    // Ignore transparent/blank frames while the WebGL map is initializing.
+    if (original[(Math.floor(height/2)*width+Math.floor(width/2))*4+3]===0) return;
+    const output=ctx.createImageData(w,h),dest=output.data;
+    const cx=(w-1)/2,cy=(h-1)/2,rx=Math.max(1,cx),ry=Math.max(1,cy);
+    function sampleColor(x,y,component) {
+      x=Math.max(0,Math.min(width-1,x)); y=Math.max(0,Math.min(height-1,y));
+      const x0=Math.floor(x),y0=Math.floor(y);
+      const x1=Math.min(width-1,x0+1),y1=Math.min(height-1,y0+1);
+      const fx=x-x0,fy=y-y0;
+      const i=(y0*width+x0)*4+component;
+      const a=original[i],b=original[(y0*width+x1)*4+component];
+      const c=original[(y1*width+x0)*4+component],d=original[(y1*width+x1)*4+component];
+      return (a+(b-a)*fx)*(1-fy)+(c+(d-c)*fx)*fy;
+    }
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const dx=(x-cx)/rx,dy=(y-cy)/ry;
+      const r=Math.hypot(dx,dy),i=(y*w+x)*4;
+      // Thick convex lens: low distortion centrally, stronger at the edge.
+      const rim=Math.min(1,Math.max(0,(r-.34)/.63));
+      const bend=9*rim*rim;
+      const px=x+pad-dx*bend,py=y+pad-dy*bend;
+      const chroma=.9*rim*rim;
+      dest[i]=sampleColor(px-dx*chroma,py-dy*chroma,0);
+      dest[i+1]=sampleColor(px,py,1);
+      dest[i+2]=sampleColor(px+dx*chroma,py+dy*chroma,2);
+      // Leave highlights, shadows, and icons legible above the live map.
+      dest[i+3]=Math.round(205+36*rim);
+    }
+    ctx.putImageData(output,0,0);
+  }
+  function draw() {
+    pending=false;
+    if(disabled || document.hidden || !parentMapCanvas.width || !parentMapCanvas.height) return;
+    const mapRect=parentMapCanvas.getBoundingClientRect();
+    if(!mapRect.width || !mapRect.height)return;
+    try { for(const lens of lenses) renderLens(lens,parentMapCanvas,mapRect); }
+    catch(err) {
+      console.warn('MyArah experimental refractive glass unavailable; using CSS glass:',err?.message||err);
+      clearLens();
+    }
+  }
+  function schedule() {
+    if(disabled || pending || document.hidden)return;
+    const now=performance.now();
+    if(now-lastPaint<100) return; // At most 10 samples/s; preserve navigation FPS.
+    lastPaint=now;pending=true;
+    requestAnimationFrame(draw);
+  }
+  document.body.setAttribute('data-myarah-optical','on');
+  mapInstance.on('render',schedule);
+  mapInstance.on('resize',schedule);
+  mapInstance.on('idle',schedule);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)schedule();});
+  window.addEventListener('resize',schedule,{passive:true});
+  // Initial map paint and iOS Home Screen resume will render the lenses.
+  schedule();
+}
+installMyArahOpticalGlass(map);
+
 let dark=false,tilted=false,chosen=null,userMarker=null,toastTimer;
 
 // v4 map-only enhancement: keep the existing OpenFreeMap basemap.
@@ -483,7 +604,7 @@ $('tilt').addEventListener('click',()=>{
     duration: reducedMotion ? 0 : 760,
     easing: cameraEase
   });
-  $('tilt').textContent=tilted?'2D':'3D';
+  $('tilt').querySelector('.myarah-glass-label').textContent=tilted?'2D':'3D';
   $('tilt').classList.toggle('is-active',tilted);
   $('tilt').setAttribute('aria-pressed',String(tilted));
   $('tilt').setAttribute('aria-label',tilted?'Switch to 2D map':'Switch to 3D map');
