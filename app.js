@@ -118,35 +118,46 @@ function selectedPlaceData() {
 }
 
 function drawSelectedPinIcon() {
-  // Hi-DPI icon: 44 x 58 CSS px backed by 88 x 116 physical pixels.
-  // Its pointed tip sits at the map coordinate via icon-anchor: bottom.
+  // Original rounded vector pin, rendered at 2x resolution for sharp iPhone screens.
+  // Keep MapLibre's geographic anchor at the very bottom of this image.
   const canvas = document.createElement('canvas');
-  canvas.width = 88;
-  canvas.height = 116;
+  canvas.width = 96;  // 48 CSS pixels at 2x
+  canvas.height = 124; // 62 CSS pixels at 2x
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
   ctx.scale(2, 2);
+
+  // Gently tapered teardrop with a rounded tip (no narrow, sharp spike).
   ctx.beginPath();
-  ctx.moveTo(22, 57);
-  ctx.bezierCurveTo(18, 49, 6, 33, 6, 21);
-  ctx.bezierCurveTo(6, 11, 13, 5, 22, 5);
-  ctx.bezierCurveTo(31, 5, 38, 11, 38, 21);
-  ctx.bezierCurveTo(38, 33, 26, 49, 22, 57);
+  ctx.moveTo(24, 60);
+  ctx.bezierCurveTo(22.3, 60, 20.9, 58.5, 19, 56);
+  ctx.bezierCurveTo(12.8, 47.9, 5.5, 36.7, 5.5, 24.4);
+  ctx.bezierCurveTo(5.5, 13.8, 13.7, 6.6, 24, 6.6);
+  ctx.bezierCurveTo(34.3, 6.6, 42.5, 13.8, 42.5, 24.4);
+  ctx.bezierCurveTo(42.5, 36.7, 35.2, 47.9, 29, 56);
+  ctx.bezierCurveTo(27.1, 58.5, 25.7, 60, 24, 60);
   ctx.closePath();
-  ctx.shadowColor = 'rgba(20, 48, 80, .33)';
+
+  ctx.shadowColor = 'rgba(15, 37, 70, .30)';
   ctx.shadowBlur = 5;
   ctx.shadowOffsetY = 2;
-  ctx.fillStyle = '#287dd1';
+  const fill = ctx.createLinearGradient(13, 6, 34, 56);
+  fill.addColorStop(0, '#55AEF7');
+  fill.addColorStop(.46, '#2B83D8');
+  fill.addColorStop(1, '#1B64B2');
+  ctx.fillStyle = fill;
   ctx.fill();
   ctx.shadowColor = 'transparent';
   ctx.shadowBlur = 0;
   ctx.shadowOffsetY = 0;
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2.7;
+  ctx.strokeStyle = '#FFFFFF';
   ctx.stroke();
+
+  // Bright central hole stays readable against both light and dark maps.
   ctx.beginPath();
-  ctx.arc(22, 21, 6.3, 0, 2 * Math.PI);
-  ctx.fillStyle = '#fff';
+  ctx.arc(24, 24.6, 8.1, 0, 2 * Math.PI);
+  ctx.fillStyle = '#FFFFFF';
   ctx.fill();
   return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
@@ -1170,7 +1181,12 @@ function routeGeojson() {
 }
 
 function routeStartGeojson() {
-  return { type: 'FeatureCollection', features: routeOrigin ? [{
+  // The blue GPS indicator already marks the current location. Show the green
+  // origin dot only for a manually chosen starting point on the map.
+  const manualStart = routeOrigin?.kind === 'map' &&
+    Array.isArray(routeOrigin.coords) && routeOrigin.coords.length === 2 &&
+    routeOrigin.coords.every(Number.isFinite);
+  return { type: 'FeatureCollection', features: manualStart ? [{
     type: 'Feature', geometry: { type: 'Point', coordinates: routeOrigin.coords }, properties: {}
   }] : [] };
 }

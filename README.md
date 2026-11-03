@@ -319,3 +319,11 @@ When you tap **Start navigation**, MyArah automatically requests a `screen` Wake
 - If the screen still locks, consider temporarily increasing iPhone **Settings → Display & Brightness → Auto-Lock** (if available), then restore your preferred setting afterward.
 
 No changes were made to routing, GPS smoothing, search, traffic, or other map features.
+
+
+## Refined map pins (this update)
+- GPS-origin route planning no longer adds a duplicate green dot. The existing blue live-location indicator remains the visible starting location.
+- Manually selected starting points still display a green origin dot so users can distinguish them from live GPS.
+- Search destinations now use an original softer, rounded blue pin rendered as a high-resolution vector shape on a canvas. The pin remains a map-native MapLibre symbol anchored to its destination coordinate, including through rotation and 2D/3D changes.
+- The pin has a white centre and outline for light/dark map legibility. There are no new runtime dependencies.
+- No changes to TomTom traffic, search, navigation, direction cone, wake lock or route ranking logic.
