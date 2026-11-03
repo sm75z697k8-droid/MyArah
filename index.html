@@ -11,8 +11,8 @@
   <title>MyArah — Explore Malaysia</title>
   <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=myarah-landscape-1">
-  <script type="module" src="app.js?v=myarah-landscape-1"></script>
+  <link rel="stylesheet" href="styles.css?v=myarah-landscape-dock-1">
+  <script type="module" src="app.js?v=myarah-landscape-dock-1"></script>
 </head>
 <body>
   <main class="app" aria-label="MyArah map">
@@ -111,11 +111,11 @@
         <strong id="navRemaining">—</strong>
         <span id="navEta">ETA —</span>
       </div>
-      <div class="nav-footer-buttons">
-        <button id="navSound" type="button" aria-label="Enable spoken directions" aria-pressed="false" title="Voice directions">Voice off</button>
-        <button id="navFollow" type="button" aria-label="Follow my location" title="Follow location">Follow</button>
-        <button id="navReroute" type="button" hidden>Recalculate</button>
-        <button id="navEnd" type="button" class="nav-end">End</button>
+      <div class="nav-footer-buttons" role="group" aria-label="Navigation actions">
+        <button id="navSound" class="nav-action-voice" type="button" aria-label="Enable spoken directions" aria-pressed="false" title="Voice directions"><svg class="nav-action-icon nav-voice-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m17 9 5 6m0-6-5 6"/></svg><svg class="nav-action-icon nav-voice-playing" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg><span class="nav-btn-label">Voice off</span></button>
+        <button id="navFollow" class="nav-action-follow" type="button" aria-label="Recenter and follow my location" data-following="true" title="Recenter map"><svg class="nav-action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/></svg><span class="nav-btn-label">Follow</span></button>
+        <button id="navReroute" class="nav-action-reroute" type="button" aria-label="Recalculate driving route" title="Recalculate route" hidden><svg class="nav-action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 11a8 8 0 0 0-14.9-4"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.9 4"/><path d="M20 20v-5h-5"/></svg><span class="nav-btn-label">Recalculate</span></button>
+        <button id="navEnd" class="nav-end" type="button" aria-label="End navigation" title="End navigation"><svg class="nav-action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg><span class="nav-btn-label">End</span></button>
       </div>
     </section>
     <div class="toast" id="notice" role="status" aria-live="polite" hidden></div>

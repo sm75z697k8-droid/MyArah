@@ -1339,3 +1339,193 @@ body.dark .nav-footer-buttons #navReroute:not([hidden]){color:#d1edff;background
   .nav-hud,.nav-footer,.nav-text-change{animation:none!important;}
   .nav-start,.nav-footer-buttons button{transition:none!important;}
 }
+
+/* === MyArah landscape icon dock: actual Lucide SVGs, no remote icon loading === */
+.nav-footer-buttons .nav-action-icon { display:none; }
+.nav-footer-buttons .nav-btn-label { display:inline; }
+.nav-footer-buttons button { display:inline-flex; align-items:center; justify-content:center; }
+.nav-footer-buttons .nav-voice-playing { display:none; }
+
+@media (orientation:landscape) and (max-height:560px) {
+  /* Full-size transparent overlay is pointer-transparent. Only the circular
+     controls capture taps; the map remains fully pannable everywhere else. */
+  #navFooter.nav-footer {
+    position:absolute;
+    inset:0;
+    width:auto;
+    max-width:none;
+    padding:0;
+    margin:0;
+    border:0;
+    border-radius:0;
+    background:transparent;
+    box-shadow:none;
+    -webkit-backdrop-filter:none;
+    backdrop-filter:none;
+    animation:none;
+    pointer-events:none;
+  }
+  body.dark #navFooter.nav-footer {
+    background:transparent;
+    border:0;
+    box-shadow:none;
+  }
+  #navFooter .nav-trip-details {
+    position:absolute;
+    left:calc(env(safe-area-inset-left) + 13px);
+    bottom:calc(env(safe-area-inset-bottom) + 13px);
+    width:min(225px,32vw);
+    min-height:57px;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:flex-start;
+    gap:3px;
+    margin:0;
+    padding:10px 13px;
+    border:1px solid rgba(255,255,255,.80);
+    border-radius:17px;
+    background:rgba(247,250,254,.92);
+    box-shadow:0 5px 22px rgba(11,34,54,.22);
+    -webkit-backdrop-filter:blur(20px) saturate(1.4);
+    backdrop-filter:blur(20px) saturate(1.4);
+    pointer-events:none;
+  }
+  #navFooter .nav-trip-details strong {
+    font-size:16px;
+    font-weight:800;
+    line-height:1.08;
+    letter-spacing:-.035em;
+    color:#19314c;
+    white-space:nowrap;
+  }
+  #navFooter .nav-trip-details span {
+    font-size:11px;
+    font-weight:650;
+    line-height:1.2;
+    text-align:left;
+    color:#4b6075;
+    white-space:normal;
+  }
+  #navFooter .nav-footer-buttons {
+    position:absolute;
+    left:50%;
+    bottom:calc(env(safe-area-inset-bottom) + 13px);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    grid-template-columns:none;
+    gap:10px;
+    width:max-content;
+    max-width:calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 20px);
+    padding:0;
+    margin:0;
+    background:transparent;
+    transform:translateX(-50%);
+    pointer-events:auto;
+  }
+  #navFooter .nav-footer-buttons button {
+    flex:none;
+    position:relative;
+    display:grid;
+    place-items:center;
+    width:56px;
+    min-width:56px;
+    height:56px;
+    min-height:56px;
+    padding:0;
+    border:1.5px solid rgba(255,255,255,.94);
+    border-radius:50%;
+    color:#28425e;
+    background:linear-gradient(150deg,rgba(255,255,255,.97),rgba(221,233,246,.92));
+    box-shadow:0 5px 17px rgba(13,38,60,.29),inset 0 1px 0 rgba(255,255,255,.97);
+    -webkit-backdrop-filter:blur(20px) saturate(1.3);
+    backdrop-filter:blur(20px) saturate(1.3);
+    transition:transform .18s ease,background .18s ease,box-shadow .18s ease;
+    touch-action:manipulation;
+  }
+  #navFooter .nav-footer-buttons button:active {
+    transform:scale(.91);
+    box-shadow:0 3px 10px rgba(13,38,60,.20),inset 0 1px 0 rgba(255,255,255,.97);
+  }
+  #navFooter .nav-footer-buttons .nav-action-icon {
+    display:block;
+    width:25px;
+    height:25px;
+    stroke-width:2.25;
+  }
+  #navFooter .nav-footer-buttons .nav-btn-label { display:none; }
+  #navFooter #navSound[aria-pressed="true"] {
+    color:#075a9d;
+    border-color:rgba(81,159,217,.88);
+    background:linear-gradient(160deg,#f2faff,#c9e6fc);
+  }
+  #navFooter #navSound .nav-voice-playing { display:none; }
+  #navFooter #navSound[aria-pressed="true"] .nav-voice-muted { display:none; }
+  #navFooter #navSound[aria-pressed="true"] .nav-voice-playing { display:block; }
+  #navFooter #navFollow[data-following="true"] {
+    color:#0e6aad;
+    background:linear-gradient(160deg,#f3faff,#d4eafd);
+  }
+  #navFooter #navReroute:not([hidden]) {
+    color:#155e97;
+    background:linear-gradient(160deg,#f1f8ff,#d2e9fb);
+    border-color:rgba(113,176,218,.9);
+  }
+  #navFooter #navReroute.nav-action-working svg { animation:navDockSpin 1.1s linear infinite; }
+  #navFooter #navEnd.nav-end {
+    color:#fff;
+    background:linear-gradient(155deg,#b54a51,#8e313a);
+    border-color:rgba(255,205,210,.64);
+    box-shadow:0 5px 16px rgba(101,22,30,.29),inset 0 1px 0 rgba(255,255,255,.18);
+  }
+  body.dark #navFooter .nav-trip-details {
+    background:rgba(27,42,60,.94);
+    border-color:rgba(165,191,214,.34);
+    box-shadow:0 6px 22px rgba(0,0,0,.45);
+  }
+  body.dark #navFooter .nav-trip-details strong { color:#f3f8ff; }
+  body.dark #navFooter .nav-trip-details span { color:#bed0e1; }
+  body.dark #navFooter .nav-footer-buttons button {
+    color:#e8f3ff;
+    background:linear-gradient(150deg,rgba(53,77,104,.96),rgba(22,39,60,.96));
+    border-color:rgba(168,194,216,.53);
+    box-shadow:0 5px 18px rgba(0,0,0,.49),inset 0 1px 0 rgba(255,255,255,.15);
+  }
+  body.dark #navFooter #navSound[aria-pressed="true"],
+  body.dark #navFooter #navFollow[data-following="true"],
+  body.dark #navFooter #navReroute:not([hidden]) {
+    color:#b9e4ff;
+    background:linear-gradient(150deg,#285e84,#1b3b58);
+    border-color:rgba(121,189,236,.65);
+  }
+  body.dark #navFooter #navEnd.nav-end {
+    color:#fff;
+    background:linear-gradient(155deg,#ab4751,#772c35);
+    border-color:rgba(255,158,164,.50);
+  }
+  /* The maneuver card stays in the upper left; the dock owns the lower center. */
+  #navHud.nav-hud { width:min(390px,40vw); max-width:390px; }
+}
+@keyframes navDockSpin { to { transform:rotate(360deg); } }
+
+/* Very narrow landscape screens: stack trip summary just above the dock so
+   controls do not collide, even when all four buttons are visible. */
+@media (orientation:landscape) and (max-height:560px) and (max-width:780px) {
+  #navFooter .nav-trip-details {
+    left:calc(env(safe-area-inset-left) + 12px);
+    bottom:calc(env(safe-area-inset-bottom) + 84px);
+    min-height:46px;
+    padding:7px 11px;
+    width:min(205px,37vw);
+  }
+  #navFooter .nav-footer-buttons { gap:8px; }
+  #navFooter .nav-footer-buttons button {
+    width:52px;min-width:52px;height:52px;min-height:52px;
+  }
+  #navHud.nav-hud { width:min(345px,46vw); }
+}
+@media (prefers-reduced-motion:reduce){
+  #navFooter .nav-footer-buttons button { transition:none; }
+  #navFooter #navReroute.nav-action-working svg { animation:none; }
+}

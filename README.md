@@ -370,3 +370,16 @@ No changes were made to routing, GPS smoothing, search, traffic, or other map fe
 - Added a “Then” upcoming-turn preview under the main turn card, similar to Apple Maps / Google Maps.
 - Navigation footer buttons reflow into a 2-column grid in landscape for better readability.
 - Added an ETA safety fallback to avoid displaying “Invalid Date”.
+
+
+## Landscape icon dock refinement
+- Landscape navigation now shows **56px circular icon-only buttons** centered along the bottom, rather than wide word buttons. On narrow landscape screens, controls stay at least 52px across.
+- Left-side journey information is a separate small glass pill; the full-screen footer backdrop is transparent and does not block map gestures.
+- Buttons keep their existing functions: voice on/off, recenter/follow, recalculation (when off-route), and End. Toggling them no longer removes the icons because JS updates text-only child spans and ARIA labels instead of entire buttons.
+- The screen reader names and active/disabled states remain available; the word labels remain visible in portrait. Colors and contrast are tuned for light and dark appearances.
+- The icons are embedded inline, so **they work without loading any new icon CDN at run time**. They use SVG paths based on the [Lucide Icons](https://lucide.dev/icons) designs: [volume-x](https://lucide.dev/icons/volume-x), [volume-2](https://lucide.dev/icons/volume-2), [locate-fixed](https://lucide.dev/icons/locate-fixed), [refresh-cw](https://lucide.dev/icons/refresh-cw), and [circle-stop](https://lucide.dev/icons/circle-stop).
+
+### Lucide licensing notice
+The embedded vector icon artwork is derived from Lucide Icons (https://lucide.dev), copyright (c) Lucide Icons and Contributors, under the ISC License.
+
+> Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies. THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING FROM, OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.

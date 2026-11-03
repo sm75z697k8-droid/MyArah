@@ -2276,8 +2276,8 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   navigation.arrivalCount=0;
   $('navReroute').hidden=true;updateNavAlert('');
   const nextTurnRow=$('navNextTurn'); if(nextTurnRow) nextTurnRow.hidden=true;
-  $('navSound').textContent='Voice off';$('navSound').setAttribute('aria-pressed','false');
-  $('navFollow').textContent='Follow';
+  setNavSoundState(false);
+  setNavFollowState(true);
   refreshNavigationStart();
   setSheetPosition('peek');
   toast(message);
@@ -2345,7 +2345,7 @@ function startNavigation(){
     myarahRecoverViewport();
     appRoot.classList.add('navigation-active');
     navHud.hidden=false;navFooter.hidden=false;
-    $('navFollow').textContent='Following';
+    setNavFollowState(true);
     showUserLocation(displayed);
     initializeNavEta(route,navigation.lastProgress);
     refreshNavigationGuidance(navigation.lastProgress);
@@ -2377,7 +2377,7 @@ async function recalculateNavigation(){
   const since=Date.now()-navigation.lastReroute;
   if(since<30000){updateNavAlert('Please wait before recalculating again.');return;}
   navigation.rerouting=true;navigation.lastReroute=Date.now();
-  const button=$('navReroute');button.disabled=true;button.textContent='Updating…';
+  const button=$('navReroute');button.disabled=true;button.classList.add('nav-action-working');setNavActionLabel('navReroute','Updating…','Updating route');
   const destinationId=navigation.destinationId,origin=[...navigation.lastCoords];
   updateNavAlert('Finding a new route from your GPS…');
   const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),20000);
@@ -2419,27 +2419,46 @@ async function recalculateNavigation(){
     if(navigation.active)updateNavAlert(err.name==='AbortError'?'Recalculation timed out. Try again.':err.message||'Recalculation failed.');
   }finally{
     clearTimeout(timeout);navigation.rerouting=false;
-    button.disabled=false;button.textContent='Recalculate';
+    button.disabled=false;button.classList.remove('nav-action-working');setNavActionLabel('navReroute','Recalculate','Recalculate driving route');
   }
 }
 
+// Keep the Lucide SVG inside icon buttons intact while updating the visible
+// portrait label and accessible description. Landscape hides only the label.
+function setNavActionLabel(id,label,ariaLabel=label){
+  const button=$(id);
+  const text=button?.querySelector('.nav-btn-label');
+  if(text)text.textContent=label;
+  if(button)button.setAttribute('aria-label',ariaLabel);
+}
+function setNavFollowState(following){
+  const button=$('navFollow');
+  if(button)button.dataset.following=following?'true':'false';
+  setNavActionLabel('navFollow',following?'Following':'Recenter',
+    following?'Map following my location':'Recenter map and follow my location');
+}
+function setNavSoundState(enabled){
+  const button=$('navSound');
+  if(button)button.setAttribute('aria-pressed',String(enabled));
+  setNavActionLabel('navSound',enabled?'Voice on':'Voice off',
+    enabled?'Mute spoken directions':'Enable spoken directions');
+}
 navStartButton.addEventListener('click',startNavigation);
 $('navEnd').addEventListener('click',()=>endNavigation());
 $('navFollow').addEventListener('click',()=>{
   navigation.follow=true;
-  $('navFollow').textContent='Following';
+  setNavFollowState(true);
   if(navigation.markerPoint)followNavigationCamera(navigation.markerPoint,navigation.lastBearing,true);
 });
 map.on('dragstart',event=>{
-  if(navigation.active && event.originalEvent){navigation.follow=false;$('navFollow').textContent='Recenter';}
+  if(navigation.active && event.originalEvent){navigation.follow=false;setNavFollowState(false);}
 });
 $('navReroute').addEventListener('click',()=>void recalculateNavigation());
 $('navSound').addEventListener('click',()=>{
   if(!('speechSynthesis' in window)){toast('Voice directions are not supported in this browser');return;}
   navigation.voiced=!navigation.voiced;
   const button=$('navSound');
-  button.textContent=navigation.voiced?'Voice on':'Voice off';
-  button.setAttribute('aria-pressed',String(navigation.voiced));
+  setNavSoundState(navigation.voiced);
   if(navigation.voiced){
     const before=navigation.guidanceSpokenAt;
     refreshNavigationGuidance(navigation.lastProgress,navigation.guidanceSpeed);
