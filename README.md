@@ -338,3 +338,16 @@ No changes were made to routing, GPS smoothing, search, traffic, or other map fe
 - The existing **Voice on/off** button stays. No new controls, UI sections, services, keys or audio downloads are needed. Spoken guidance still uses device Web Speech API and still requires MyArah in the foreground.
 - A web app **cannot force Apple Siri's voice** or guarantee that a particular high-quality voice exists. Speech output may still be interrupted by iOS policies.
 - Scope: `app.js` voice selection and announcement wording, `index.html` version refresh, and README. `styles.css` and all routing, GPS, markers, traffic and screen-awake behavior are unchanged.
+
+
+## Turn-by-turn instruction timing refinement
+
+- Upcoming turn switches only **after** passing its route offset (plus a small speed-scaled GPS buffer), rather than prematurely.
+- Preparation cue is approximately **27 seconds before** a maneuver, bounded to 160–850 metres; action cue is approximately **8 seconds before**, bounded to 42–235 metres. Both adapt to the car's accepted GPS speed (actual values depend on road speed and GPS fixes).
+- Uses accepted route-matched progress only. Stale, off-route and rejected GPS fixes do not trigger instructions.
+- A leap across both thresholds selects the more urgent action cue. Speech is not marked as spoken while muted, hidden or unavailable.
+- Preserves calm iPhone TTS voice/rate. Early warnings wait for existing speech to finish; near-turn prompts can supersede outdated warnings when necessary.
+- Arrival is phrased as approaching until GPS verifies arrival.
+- Timing history resets after route recalculation, starting and ending navigation.
+- No new UI/buttons, permissions, third-party services or exposed API keys.
+- Test while stationary or as a passenger first; live turn timing depends on GPS accuracy and iOS speech availability.

@@ -1531,6 +1531,9 @@ const navigation = {
   lastCoords:null, lastUpdate:0, lastCamera:0, lastProgress:0,
   lastBearing:null, markerAnimation:0, markerPoint:null,
   follow:true, voiced:false, spoken:new Set(), turnIndex:-1,
+  // Guidance announcements are relative to movement, not fixed road distances.
+  // Keep timing state separate from GPS/map smoothing and reset it on reroute.
+  guidanceSpeed:null, guidanceSpokenAt:0,
   offCount:0, offRoute:false, rerouting:false, lastReroute:0,
   lastPosition:null, announcedArrival:false,
   // Indexed route geometry and filtered position are held only during guidance.
@@ -1891,34 +1894,57 @@ function spokenTurnInstruction(instruction,distance){
   const lead=distance<35?'Coming up,':`In ${speechDistance(distance)},`;
   return `${lead} ${action[0].toLowerCase()}${action.slice(1)}.`;
 }
-function speakDirection(text){
-  if(!navigation.voiced || !navigation.active || document.hidden || !('speechSynthesis' in window)) return;
+function speakDirection(text,{interrupt=true}={}){
+  if(!text || !navigation.voiced || !navigation.active || document.hidden ||
+      !('speechSynthesis' in window)) return false;
   try {
     const synth=window.speechSynthesis;
+    // Don't cut off a useful instruction for a non-urgent reminder.
+    if(synth.speaking && !interrupt)return false;
     const utterance=new SpeechSynthesisUtterance(text);
     const voice=preferredNavigationVoice();
     if(voice)utterance.voice=voice;
     utterance.lang=voice?.lang||'en-GB';
-    utterance.rate=.88; // More time to follow road names and turns.
-    utterance.pitch=1.0; // Natural pitch avoids a synthetic, cartoonish tone.
-    utterance.volume=.92; // A gentler level; device volume stays user-controlled.
-    synth.cancel(); // A new upcoming turn replaces outdated speech.
+    utterance.rate=.88; // Keep the calm voice selected in the previous update.
+    utterance.pitch=1.0;
+    utterance.volume=.92;
+    if(interrupt)synth.cancel();
     synth.speak(utterance);
-  }catch(_){/* iOS can block speech or have no usable voice. */}
+    return true;
+  }catch(_){return false;/* Safari may refuse or temporarily lack a voice. */}
 }
 function updateNavAlert(text){
   navAlert.hidden=!text;
   navAlert.textContent=text||'';
 }
-function nextNavInstruction(route,progress){
-  // Departure is not a driving maneuver; use the following provider instruction.
-  return route.instructions.find(i => i.maneuver!=='depart' && i.offset >= progress-12) ||
-    route.instructions[route.instructions.length-1];
+// TomTom Orbis routeOffsetInMeters is the position of the *actual maneuver*,
+// not an early-warning marker. Only move to the next card after that position.
+// A small speed-related buffer prevents a GPS fix hovering around a junction
+// from switching the card back and forth (route progress is also monotonic).
+function nextNavInstruction(route,progress,speed=null){
+  const behind=Math.max(9,Math.min(23,(Number.isFinite(speed)?speed:9)*.9));
+  const eligible=route.instructions.filter(i=>i.maneuver!=='depart');
+  return eligible.find(i=>i.offset+behind>=progress) || eligible[eligible.length-1] || null;
 }
-function refreshNavigationGuidance(progress){
+
+// Two useful cues rather than fixed 500m / 150m warnings:
+// preparation ~27s before a turn; action ~8s before it. Short minimums help
+// in city traffic, while caps stop a fast road from announcing too early.
+// Speed is measured in metres/second. Unknown speed uses a gentle default.
+function navigationCueDistances(speed){
+  const v=Number.isFinite(speed) && speed>=0 ? Math.min(speed,42) : 9;
+  return {
+    prepare:Math.max(160,Math.min(850,v*27+25)),
+    turn:Math.max(42,Math.min(235,v*8+12))
+  };
+}
+function isArrivalInstruction(instruction){
+  return /^arrive/i.test(instruction.maneuver);
+}
+function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
   const route=navigation.route;
-  if(!route) return;
-  const next=nextNavInstruction(route,progress);
+  if(!route)return;
+  const next=nextNavInstruction(route,progress,speed);
   if(!next)return;
   const index=route.instructions.indexOf(next);
   const distance=Math.max(0,next.offset-progress);
@@ -1933,19 +1959,34 @@ function refreshNavigationGuidance(progress){
   }
   $('navTurnSymbol').textContent=guidanceIcon(next.maneuver);
   $('navTurnDistance').textContent=navDistance(distance);
-  // Use the actual provider message, not an invented turn.
   $('navTurnText').textContent=next.message || guidanceLabel(next.maneuver);
-  // A large GPS update can cross both thresholds at once. Speak once,
-  // preferring the more urgent instruction rather than interrupting ourselves.
-  for (const threshold of [150,500]){
-    const key=`${index}-${threshold}`;
-    if(distance<=threshold && distance>(threshold===150?8:130) && !navigation.spoken.has(key)){
-      navigation.spoken.add(key);
-      if(threshold===150) navigation.spoken.add(`${index}-500`);
-      speakDirection(spokenTurnInstruction(next,distance));
-      break;
-    }
-  }
+
+  // Only accepted, on-route GPS progress drives this function. An early cue
+  // is never treated as spoken while voice is off or Web Speech is unavailable.
+  if(!navigation.voiced || navigation.offRoute || document.hidden)return;
+  const windows=navigationCueDistances(speed);
+  const phase=distance<=windows.turn?'turn':distance<=windows.prepare?'prepare':null;
+  if(!phase)return;
+  const key=`${index}-${phase}`;
+  if(navigation.spoken.has(key))return;
+  // Do not read a turn that the GPS already shows as essentially completed.
+  const v=Number.isFinite(speed) && speed>=0 ? speed:9;
+  if(distance<=Math.max(7,v*.45) && !isArrivalInstruction(next))return;
+
+  const now=Date.now();
+  const since=navigation.guidanceSpokenAt ? now-navigation.guidanceSpokenAt:Infinity;
+  const urgent=phase==='turn' && distance<=Math.max(32,v*3.5);
+  // The action cue takes priority when a GPS update crosses both windows.
+  // Otherwise leave room for the preceding speech to finish naturally.
+  if(since<(urgent?1300:phase==='turn'?3200:4400))return;
+  const interrupt=phase==='turn' && (urgent || since>=4800);
+  let message=isArrivalInstruction(next)
+    ? `Your destination is ${speechDistance(Math.max(10,distance))} ahead.`
+    : spokenTurnInstruction(next,distance);
+  if(!speakDirection(message,{interrupt}))return;
+  navigation.guidanceSpokenAt=now;
+  navigation.spoken.add(key);
+  if(phase==='turn')navigation.spoken.add(`${index}-prepare`);
 }
 function refreshNavTrip(progress){
   const route=navigation.route;
@@ -2055,7 +2096,13 @@ function onNavigationLocation(position){
     navigation.lastProgress=Math.max(navigation.lastProgress,
       Math.min(navigation.route.meters,
         matchedDisplayAlong/navigation.routeIndex.total*navigation.route.meters));
-    refreshNavigationGuidance(navigation.lastProgress);
+    // Smooth noisy GPS-speed reports so the warning distance does not
+    // oscillate while the car slows for a junction.
+    if(speed!==null){
+      navigation.guidanceSpeed=navigation.guidanceSpeed===null ? speed :
+        navigation.guidanceSpeed*.6 + speed*.4;
+    }
+    refreshNavigationGuidance(navigation.lastProgress,navigation.guidanceSpeed);
     refreshNavTrip(navigation.lastProgress);
     const heading=routeHeadingAt(navigation.routeIndex,matchedDisplayAlong,speed);
     bearing=stableRouteBearing(heading,speed);
@@ -2096,7 +2143,9 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   navHud.hidden=true;navFooter.hidden=true;
   appRoot.classList.remove('navigation-active');
   navigation.follow=true;navigation.voiced=false;navigation.turnIndex=-1;
-  navigation.spoken.clear();navigation.offCount=0;navigation.offRoute=false;
+  navigation.spoken.clear();navigation.guidanceSpeed=null;
+  navigation.guidanceSpokenAt=0;
+  navigation.offCount=0;navigation.offRoute=false;
   navigation.routeIndex=null;navigation.matchedAlong=null;navigation.drawnAlong=null;
   navigation.lastRawFix=null;navigation.lastCameraPoint=null;
   navigation.lastCameraBearing=null;navigation.offSince=0;navigation.onCount=0;
@@ -2153,6 +2202,8 @@ function startNavigation(){
       lastProgress:Math.max(0,(matched?.along/index.total??snap.fraction)*route.meters),
       lastUpdate:Date.now(),lastCamera:0,lastBearing:null,follow:true,
       turnIndex:-1,offCount:0,offRoute:false,voiced:false,announcedArrival:false,
+      guidanceSpeed:Number.isFinite(position.coords.speed) && position.coords.speed>=0 ?
+        position.coords.speed:null,guidanceSpokenAt:0,
       markerPoint:displayed,drawnAlong:matched?.along??null,
       matchedAlong:matched?.along??null,spoken:new Set(),lastPosition:position,
       lastRawFix:{point:[...point],accuracy:position.coords.accuracy,
@@ -2217,7 +2268,9 @@ async function recalculateNavigation(){
     routeOptions=[route];routeSelected=0;routeOrigin={coords:origin,kind:'gps',label:'Current location'};
     navigation.route=route;navigation.routeIndex=routeGeometryIndex(route.coordinates);
     navigation.lastProgress=0;navigation.turnIndex=-1;
-    navigation.spoken.clear();navigation.offCount=0;navigation.offRoute=false;
+    navigation.spoken.clear();navigation.guidanceSpeed=null;
+    navigation.guidanceSpokenAt=0;
+    navigation.offCount=0;navigation.offRoute=false;
     navigation.matchedAlong=null;navigation.drawnAlong=null;
     navigation.offSince=0;navigation.onCount=0;navigation.arrivalCount=0;
     // A new route restarts matching at the latest real GPS point, not the
@@ -2254,7 +2307,9 @@ $('navSound').addEventListener('click',()=>{
   button.textContent=navigation.voiced?'Voice on':'Voice off';
   button.setAttribute('aria-pressed',String(navigation.voiced));
   if(navigation.voiced){
-    speakDirection('Voice directions are on.');
+    const before=navigation.guidanceSpokenAt;
+    refreshNavigationGuidance(navigation.lastProgress,navigation.guidanceSpeed);
+    if(navigation.guidanceSpokenAt===before)speakDirection('Voice directions are on.',{interrupt:false});
   }else if('speechSynthesis' in window){
     try{window.speechSynthesis.cancel();}catch(_){}
   }
