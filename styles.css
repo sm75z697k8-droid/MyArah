@@ -1138,3 +1138,105 @@ body.dark #overlay .recent-swipe-hint { color: #b8c7d5; }
   #overlay .recent-swipe-item .result,
   #overlay .recent-swipe-item.is-removing { transition: none; }
 }
+
+
+/* === Live navigation preview. New UI is separate from MyArah's existing sheets. === */
+.nav-start[hidden],.nav-hud[hidden],.nav-footer[hidden],.nav-alert[hidden],
+#navReroute[hidden] { display:none!important; }
+.nav-start {
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  width:100%;min-height:47px;margin-top:11px;padding:11px 14px;
+  border:1px solid #1765ac;border-radius:13px;background:#176db8;color:white;
+  font-size:14px;font-weight:780;box-shadow:0 3px 12px rgba(19,87,152,.18);
+}
+.nav-start:disabled{background:#d9e2eb;color:#63778a;border-color:#c1ceda;box-shadow:none;}
+.nav-start span{font-size:20px;}
+body.dark .nav-start:disabled {background:#2e4154;color:#bbcddd;border-color:#456078;}
+.app.navigation-active .topbar,
+.app.navigation-active #bottomSheet,
+.app.navigation-active .map-controls,
+.app.navigation-active #trafficLegend {
+  opacity:0;pointer-events:none;
+}
+.app.navigation-active #bottomSheet {transform:translateY(calc(100% + 40px));}
+.app.navigation-active .map-controls {transform:translateX(12px);}
+.app.navigation-active .topbar {transform:translateY(-12px);}
+.nav-hud{
+  position:absolute;left:max(12px,env(safe-area-inset-left));
+  right:max(12px,env(safe-area-inset-right));
+  top:calc(env(safe-area-inset-top) + 14px);
+  z-index:8;pointer-events:none;
+  animation:navHudEnter 320ms cubic-bezier(.18,.82,.25,1) both;
+}
+.nav-hud-turn{
+  display:flex;gap:14px;align-items:center;
+  border-radius:21px;padding:13px 15px;
+  background:rgba(255,255,255,.95);border:1px solid rgba(255,255,255,.80);
+  box-shadow:0 7px 28px rgba(13,35,56,.19);
+}
+.nav-turn-symbol{
+  flex:0 0 56px;width:56px;height:56px;
+  display:grid;place-items:center;border-radius:16px;
+  font-size:39px;font-weight:700;line-height:1;color:#ffffff;background:#166abd;
+}
+.nav-turn-copy{min-width:0;display:flex;flex-direction:column;gap:3px;}
+.nav-turn-distance{font-size:13px;font-weight:750;color:#276ca6;letter-spacing:.01em;}
+.nav-turn-text{font-size:17px;font-weight:770;line-height:1.3;letter-spacing:-.02em;color:#1f344b;overflow-wrap:anywhere;}
+.nav-text-change {animation:navTextEnter 290ms cubic-bezier(.18,.8,.25,1);}
+.nav-alert{
+  margin:8px 2px 0;padding:10px 13px;border-radius:12px;
+  background:rgba(34,51,72,.95);color:#fff;font-size:12px;font-weight:650;
+  box-shadow:0 3px 12px rgba(14,23,35,.20);
+}
+.nav-footer{
+  position:absolute;z-index:8;
+  bottom:calc(env(safe-area-inset-bottom) + 14px);
+  left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));
+  border-radius:22px;padding:12px 13px 13px;
+  background:rgba(255,255,255,.94);border:1px solid rgba(255,255,255,.83);
+  box-shadow:0 10px 30px rgba(13,35,56,.22);
+  animation:navFooterEnter 360ms cubic-bezier(.18,.82,.25,1) both;
+}
+.nav-trip-details{display:flex;justify-content:space-between;align-items:center;gap:9px;margin:1px 4px 10px;}
+.nav-trip-details strong{font-size:18px;letter-spacing:-.03em;color:#243953;}
+.nav-trip-details span{font-size:12px;font-weight:640;color:#5b7186;text-align:right;}
+.nav-footer-buttons{display:flex;gap:7px;}
+.nav-footer-buttons button{
+  flex:1;min-width:0;min-height:44px;padding:8px 4px;border:1px solid #dbe4ed;border-radius:12px;
+  background:#edf3f8;color:#314c67;font:inherit;font-size:11px;font-weight:760;
+  white-space:nowrap;touch-action:manipulation;
+}
+.nav-footer-buttons button:active,.nav-start:active{transform:scale(.98);}
+.nav-footer-buttons .nav-end{color:white;background:#a33b42;border-color:#a33b42;}
+.nav-footer-buttons #navReroute:not([hidden]){color:#0c5797;background:#daebfb;border-color:#99c8ed;}
+body.dark .nav-hud-turn,
+body.dark .nav-footer{
+  background:rgba(27,41,58,.96);border-color:rgba(139,169,191,.3);
+  box-shadow:0 9px 32px rgba(0,0,0,.4);
+}
+body.dark .nav-turn-symbol{background:#226bab;color:#fff;}
+body.dark .nav-turn-distance{color:#8dc9fb;}
+body.dark .nav-turn-text,body.dark .nav-trip-details strong{color:#f5f8ff;}
+body.dark .nav-trip-details span{color:#b6c8db;}
+body.dark .nav-footer-buttons button{
+  background:#31465b;border-color:#526d83;color:#e5eff9;
+}
+body.dark .nav-footer-buttons .nav-end{background:#9d414b;border-color:#ad5360;color:#fff;}
+body.dark .nav-footer-buttons #navReroute:not([hidden]){color:#d1edff;background:#245a82;border-color:#558eb2;}
+@keyframes navHudEnter {from {transform:translateY(-13px);opacity:0;} to {transform:translateY(0);opacity:1;}}
+@keyframes navFooterEnter {from {transform:translateY(20px);opacity:0;} to {transform:translateY(0);opacity:1;}}
+@keyframes navTextEnter{from{opacity:.48;transform:translateY(5px);}to{opacity:1;transform:translateY(0);}}
+@media(min-width:700px){
+  .nav-hud{max-width:450px;right:auto;}
+  .nav-footer{max-width:450px;right:auto;}
+}
+@media(max-width:365px){
+  .nav-turn-symbol{flex-basis:48px;width:48px;height:48px;font-size:33px;}
+  .nav-turn-text{font-size:15px;}
+  .nav-footer-buttons{gap:5px;}
+  .nav-footer-buttons button{font-size:10px;}
+}
+@media(prefers-reduced-motion:reduce){
+  .nav-hud,.nav-footer,.nav-text-change{animation:none!important;}
+  .nav-start,.nav-footer-buttons button{transition:none!important;}
+}

@@ -192,6 +192,7 @@ map.on('style.load', () => {
 });
 
 function setPlace(place) {
+  if (navigation.active) endNavigation('Navigation ended');
   chosen=place;
   map.flyTo({center:place.coords,...cameraFor(place.zoom),duration:motion(),essential:true});
   // Marker uses map-native coordinates, not an independent DOM position.
@@ -335,6 +336,8 @@ function closeSearch() {
   $('searchSubmit').disabled=false;
   $('searchSubmit').textContent='Search';
   $('searchInput').blur();
+  // Mobile browsers sometimes scroll overflow-hidden .app when focusing input.
+  document.querySelector('.app').scrollTop=0;
 }
 function displaySearchResults(items) {
   $('recentSwipeHint').hidden=true;
@@ -874,6 +877,7 @@ function myarahRecoverViewport() {
       window.scrollTo(0, 0);
       document.documentElement.scrollTop = 0;
       document.body.scrollTop = 0;
+      appRoot.scrollTop = 0;
       myarahScheduleViewportUpdate();
     }, ms));
   }
@@ -1208,6 +1212,7 @@ function clearRouteGeometry() {
   routeOptions = [];
   routeSelected = 0;
   routeCards.replaceChildren();
+  refreshNavigationStart();
   if (map.getSource(ROUTE_SOURCE)) map.getSource(ROUTE_SOURCE).setData(routeGeojson());
 }
 
@@ -1264,7 +1269,15 @@ function normalizeProviderRoutes(payload) {
       seconds, meters,
       delay: Number.isFinite(delay) && delay >= 0 ? delay : null,
       toll: Array.isArray(raw.sections?.toll) && raw.sections.toll.length > 0,
-      arrival: summary.arrivalDateTime || null
+      arrival: summary.arrivalDateTime || null,
+      instructions: Array.isArray(raw.instructions) ? raw.instructions
+        .filter(item => Number.isFinite(item?.routeOffsetInMeters) && item.routeOffsetInMeters >= 0 &&
+          typeof item.maneuver === 'string')
+        .map(item => ({
+          maneuver: item.maneuver,
+          offset: item.routeOffsetInMeters,
+          message: typeof item.message === 'string' ? item.message.trim().slice(0,260) : ''
+        })).sort((a,b) => a.offset - b.offset) : []
     };
   }).filter(Boolean);
   // Do not invent three choices if the backend can only find one or two.
@@ -1296,6 +1309,7 @@ function renderRouteCards() {
     card.addEventListener('click',() => selectRoute(index));
     routeCards.append(card);
   });
+  refreshNavigationStart();
 }
 
 function fitRouteOnMap() {
@@ -1358,11 +1372,12 @@ async function requestRouteComparison(origin) {
         destination:{type:'Point',coordinates:chosen.coords}
       },
       routeType:'fast',travelMode:'car',traffic:'live',
-      departureDateTime:'now',maxPathAlternativeRoutes:2
+      departureDateTime:'now',maxPathAlternativeRoutes:2,
+      guidance:'instructions',instructionPhonetics:'ipa'
     };
     const response=await fetch(ROUTE_ENDPOINT,{
       method:'POST',
-      headers:{'Content-Type':'application/json','TomTom-Api-Key':trafficKey,'Attributes':'routes'},
+      headers:{'Content-Type':'application/json','TomTom-Api-Key':trafficKey,'Accept-Language':'en-GB','Attributes':'routes'},
       body:JSON.stringify(requestBody),signal:controller.signal,cache:'no-store'
     });
     if (!response.ok) throw new Error(describeRouteError(response));
@@ -1390,6 +1405,7 @@ async function requestRouteComparison(origin) {
     if (job===routeJob) {
       routeBusy=false; routeAbort=null; routePlanButton.disabled=false;
       if (!routeOptions.length) routePlanButton.firstChild.textContent='Compare driving routes ';
+      refreshNavigationStart();
     }
   }
 }
@@ -1448,6 +1464,7 @@ map.on('click',event=>{
   void requestRouteComparison(origin);
 });
 $('routeClose').addEventListener('click',()=>{
+  if (navigation.active) endNavigation('Navigation ended');
   cancelRouteRequest();endRoutePick();clearRouteGeometry();
   routeOrigin=null;routePreview.hidden=true;
   if (map.getSource(ROUTE_START_SOURCE)) map.getSource(ROUTE_START_SOURCE).setData(routeStartGeojson());
@@ -1455,8 +1472,7 @@ $('routeClose').addEventListener('click',()=>{
 });
 // The traffic key is already stored only in this device. Do not embed it in code.
 // New style (light/dark) is already handled by syncRouteLayers above.
-resetRouteComparison();
-
+// Reset the initial comparison after all navigation state initializes.
 
 // Compass redesign: follow the map rotation only, like a classic north-up dial.
 let shownCompassRotation = null;
@@ -1489,3 +1505,390 @@ compassButton.addEventListener('click', () => {
 });
 updateCompassDial();
 
+
+
+// === MyArah navigation preview — real TomTom guidance, foreground GPS only. ===
+// Navigation is intentionally not advertised as background/lock-screen guidance.
+// Route instructions are returned by TomTom; do not derive turns from the drawn line.
+const navigation = {
+  active:false, watchId:null, destinationId:null, route:null,
+  lastCoords:null, lastUpdate:0, lastCamera:0, lastProgress:0,
+  lastBearing:null, markerAnimation:0, markerPoint:null,
+  follow:true, voiced:false, spoken:new Set(), turnIndex:-1,
+  offCount:0, offRoute:false, rerouting:false, lastReroute:0,
+  lastPosition:null, announcedArrival:false
+};
+const navStartButton=$('navStart');
+const navHud=$('navHud');
+const navFooter=$('navFooter');
+const navAlert=$('navAlert');
+
+function refreshNavigationStart(){
+  if (!navStartButton) return;
+  const selected=routeOptions[routeSelected];
+  navStartButton.hidden=!selected;
+  const ready=!!selected?.instructions?.some(i => i.maneuver!=='depart');
+  navStartButton.disabled=!ready || navigation.active || routeBusy;
+  navStartButton.firstChild.textContent= ready ? 'Start navigation ' : 'Turn instructions unavailable ';
+}
+
+function guidanceLabel(maneuver){
+  const names={depart:'Continue on the route',continueStraight:'Continue straight',
+    turnLeft:'Turn left',turnRight:'Turn right',turnSlightLeft:'Slight left',
+    turnSlightRight:'Slight right',turnSharpLeft:'Sharp left',turnSharpRight:'Sharp right',
+    keepLeft:'Keep left',keepRight:'Keep right',keepCenter:'Keep center',
+    makeUTurn:'Make a U-turn',mergeLeftLane:'Merge left',mergeRightLane:'Merge right',
+    arrive:'You have arrived',arriveLeft:'Destination on the left',
+    arriveRight:'Destination on the right',arriveAhead:'Destination ahead',
+    exitMotorwayLeft:'Take the left exit',exitMotorwayRight:'Take the right exit',
+    exitMotorwayMiddle:'Take the exit',exitRoundabout:'Exit the roundabout',
+    roundaboutStraight:'Go through the roundabout',roundaboutLeft:'At roundabout, turn left',
+    roundaboutRight:'At roundabout, turn right',roundaboutBack:'Go around the roundabout',
+    passTollgate:'Approaching tollgate'};
+  return names[maneuver] || 'Follow the route';
+}
+function guidanceIcon(code){
+  if (/arrive|waypoint/i.test(code)) return '●';
+  if (/roundabout/i.test(code)) return '⟳';
+  if (/Uturn|Back/i.test(code)) return '↶';
+  if (/left/i.test(code)) return '↰';
+  if (/right/i.test(code)) return '↱';
+  return '↑';
+}
+function navDistance(m){
+  if (!Number.isFinite(m)) return '—';
+  if (m<100) return `${Math.max(0,Math.round(m/10)*10)} m`;
+  if (m<1000) return `${Math.round(m/50)*50} m`;
+  return `${(m/1000).toFixed(m<10000?1:0)} km`;
+}
+function haversineMeters(a,b){
+  const r=6371000,d=Math.PI/180;
+  const x=(b[0]-a[0])*d,y=(b[1]-a[1])*d;
+  const h=Math.sin(y/2)**2+Math.cos(a[1]*d)*Math.cos(b[1]*d)*Math.sin(x/2)**2;
+  return 2*r*Math.asin(Math.min(1,Math.sqrt(h)));
+}
+function bearingBetween(a,b){
+  const d=Math.PI/180;
+  const lat1=a[1]*d,lat2=b[1]*d,delta=(b[0]-a[0])*d;
+  const y=Math.sin(delta)*Math.cos(lat2);
+  const x=Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(delta);
+  return (Math.atan2(y,x)*180/Math.PI+360)%360;
+}
+function computePolylineProgress(coords,position){
+  // Project in meters around the sample latitude; this avoids screen-space pins.
+  if(!Array.isArray(coords)||coords.length<2) return null;
+  const cos=Math.max(.15,Math.cos(position[1]*Math.PI/180));
+  let traveled=0,best=null;
+  for(let i=0;i<coords.length-1;i++){
+    const a=coords[i],b=coords[i+1];
+    const ax=(a[0]-position[0])*111320*cos,ay=(a[1]-position[1])*110540;
+    const bx=(b[0]-position[0])*111320*cos,by=(b[1]-position[1])*110540;
+    const dx=bx-ax,dy=by-ay,len2=dx*dx+dy*dy;
+    if(len2<.0001) continue;
+    const t=Math.max(0,Math.min(1,-(ax*dx+ay*dy)/len2));
+    const distance=Math.hypot(ax+t*dx,ay+t*dy),len=Math.sqrt(len2);
+    if (!best || distance<best.distance){
+      best={distance,along:traveled+t*len,index:i,ratio:t};
+    }
+    traveled+=len;
+  }
+  if(!best || traveled<=0) return null;
+  const next=coords[Math.min(best.index+1,coords.length-1)];
+  return {...best, fraction:Math.max(0,Math.min(1,best.along/traveled)),
+    bearing:bearingBetween(coords[best.index],next)};
+}
+
+function animateNavigationMarker(coords){
+  cancelAnimationFrame(navigation.markerAnimation);
+  const previous=navigation.markerPoint || coords;
+  const from=[...previous],to=[...coords];
+  const start=performance.now(),duration=reducedMotion?0:660;
+  if(duration===0){navigation.markerPoint=to;showUserLocation(to);return;}
+  const animate=now=>{
+    if(!navigation.active) return;
+    const t=Math.min(1,(now-start)/duration);
+    const e=t*t*(3-2*t);
+    navigation.markerPoint=[from[0]+(to[0]-from[0])*e,from[1]+(to[1]-from[1])*e];
+    showUserLocation(navigation.markerPoint);
+    if(t<1) navigation.markerAnimation=requestAnimationFrame(animate);
+  };
+  navigation.markerAnimation=requestAnimationFrame(animate);
+}
+
+function followNavigationCamera(coords,bearing,force=false){
+  if(!navigation.follow || !navigation.active || document.hidden) return;
+  const now=performance.now();
+  if(!force && now-navigation.lastCamera<620) return;
+  navigation.lastCamera=now;
+  const angle=Number.isFinite(bearing)?bearing:(navigation.lastBearing??map.getBearing());
+  if(Number.isFinite(angle)) navigation.lastBearing=angle;
+  const height=appRoot.getBoundingClientRect().height;
+  map.easeTo({
+    center:coords, zoom:16.8, pitch:53, bearing:angle,
+    offset:[0,Math.round(height*.16)],
+    duration:reducedMotion?0:780, easing:cameraEase, essential:true
+  });
+}
+
+function speakDirection(text){
+  if(!navigation.voiced || !navigation.active || document.hidden || !('speechSynthesis' in window)) return;
+  try {
+    window.speechSynthesis.cancel();
+    const utterance=new SpeechSynthesisUtterance(text);
+    utterance.lang='en-GB'; utterance.rate=.96; utterance.pitch=1;
+    window.speechSynthesis.speak(utterance);
+  }catch(_){/* Browser may disallow speech until a user gesture. */}
+}
+function updateNavAlert(text){
+  navAlert.hidden=!text;
+  navAlert.textContent=text||'';
+}
+function nextNavInstruction(route,progress){
+  // Departure is not a driving maneuver; use the following provider instruction.
+  return route.instructions.find(i => i.maneuver!=='depart' && i.offset >= progress-12) ||
+    route.instructions[route.instructions.length-1];
+}
+function refreshNavigationGuidance(progress){
+  const route=navigation.route;
+  if(!route) return;
+  const next=nextNavInstruction(route,progress);
+  if(!next)return;
+  const index=route.instructions.indexOf(next);
+  const distance=Math.max(0,next.offset-progress);
+  if(index!==navigation.turnIndex){
+    navigation.turnIndex=index;
+    const text=$('navTurnText');
+    if(!reducedMotion){
+      text.classList.remove('nav-text-change');
+      void text.offsetWidth;
+      text.classList.add('nav-text-change');
+    }
+  }
+  $('navTurnSymbol').textContent=guidanceIcon(next.maneuver);
+  $('navTurnDistance').textContent=navDistance(distance);
+  // Use the actual provider message, not an invented turn.
+  $('navTurnText').textContent=next.message || guidanceLabel(next.maneuver);
+  for (const threshold of [500,150]){
+    const key=`${index}-${threshold}`;
+    if(distance<=threshold && distance>Math.max(0,threshold===150?8:130) && !navigation.spoken.has(key)){
+      navigation.spoken.add(key);
+      const dist=navDistance(distance);
+      speakDirection(`${dist}. ${next.message || guidanceLabel(next.maneuver)}`);
+    }
+  }
+}
+function refreshNavTrip(progress){
+  const route=navigation.route;
+  if(!route)return;
+  const remaining=Math.max(0,route.meters-progress);
+  $('navRemaining').textContent=navDistance(remaining)+' left';
+  // Planned traffic-adjusted duration scaled by route progress; not a fresh live ETA.
+  const approxSeconds=route.meters>0?route.seconds*remaining/route.meters:0;
+  const eta=new Date(Date.now()+approxSeconds*1000);
+  $('navEta').textContent=`ETA ${eta.toLocaleTimeString('en-MY',{hour:'numeric',minute:'2-digit'})} · approx.`;
+}
+function onNavigationLocation(position){
+  if(!navigation.active)return;
+  const point=[position.coords.longitude,position.coords.latitude];
+  const accuracy=Number(position.coords.accuracy);
+  if(!point.every(Number.isFinite))return;
+  const now=Date.now();
+  navigation.lastPosition=position;
+  // GPS updates may be inaccurate: never promote poor fixes to turn guidance.
+  if(!Number.isFinite(accuracy) || accuracy>85){
+    updateNavAlert('GPS signal weak — waiting for a more accurate position');
+    return;
+  }
+  const progress=computePolylineProgress(navigation.route.coordinates,point);
+  if(!progress)return;
+  animateNavigationMarker(point);
+  navigation.lastCoords=point;
+  const isOff=progress.distance>Math.max(65,Math.min(110,accuracy*2.2));
+  navigation.offCount=isOff?navigation.offCount+1:0;
+  navigation.offRoute=navigation.offCount>=3;
+  if(navigation.offRoute){
+    updateNavAlert('You may be off route. Recalculate using live GPS.');
+    $('navReroute').hidden=false;
+  }else{
+    $('navReroute').hidden=true;
+    updateNavAlert('');
+    // Allow a little GPS backtracking without jumping the instructions backwards.
+    navigation.lastProgress=Math.max(navigation.lastProgress,Math.min(navigation.route.meters,progress.fraction*navigation.route.meters));
+    refreshNavigationGuidance(navigation.lastProgress);
+    refreshNavTrip(navigation.lastProgress);
+  }
+  let bearing=null;
+  if(Number.isFinite(position.coords.heading) && position.coords.heading>=0 && position.coords.speed>1.5)
+    bearing=position.coords.heading;
+  else if(Number.isFinite(progress.bearing)) bearing=progress.bearing;
+  followNavigationCamera(point,bearing);
+  // Only declare arrival on repeated GPS fixes near the destination.
+  const toDestination=haversineMeters(point,chosen.coords);
+  if(!navigation.offRoute && toDestination<30 && navigation.lastProgress>=navigation.route.meters-100){
+    if(!navigation.announcedArrival){
+      navigation.announcedArrival=true;
+      speakDirection('You have arrived at your destination');
+      endNavigation('Arrived at destination');
+    }
+  }
+  navigation.lastUpdate=now;
+}
+
+function endNavigation(message='Navigation ended'){
+  if(!navigation.active)return;
+  navigation.active=false;
+  if(navigation.watchId!==null) navigator.geolocation.clearWatch(navigation.watchId);
+  navigation.watchId=null;
+  cancelAnimationFrame(navigation.markerAnimation);
+  navigation.markerAnimation=0;
+  if('speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
+  navHud.hidden=true;navFooter.hidden=true;
+  appRoot.classList.remove('navigation-active');
+  navigation.follow=true;navigation.voiced=false;navigation.turnIndex=-1;
+  navigation.spoken.clear();navigation.offCount=0;navigation.offRoute=false;
+  $('navReroute').hidden=true;updateNavAlert('');
+  $('navSound').textContent='Voice off';$('navSound').setAttribute('aria-pressed','false');
+  $('navFollow').textContent='Follow';
+  refreshNavigationStart();
+  setSheetPosition('peek');
+  toast(message);
+  if(routeOptions.length)requestAnimationFrame(fitRouteOnMap);
+}
+function startNavigation(){
+  const route=routeOptions[routeSelected];
+  if(navigation.active || !route?.instructions?.some(i=>i.maneuver!=='depart'))return;
+  if(!navigator.geolocation?.watchPosition){
+    setRouteStatus('Continuous GPS is not available on this device.',true);return;
+  }
+  if(routeOrigin?.kind!=='gps'){
+    setRouteStatus('Navigation must start from your current GPS position. Refresh routes using live GPS, then tap Start again.',true);
+    routeOrigin=null;
+    prepareComparison();
+    return;
+  }
+  // Confirm we are still near the route before enabling live turn directions.
+  navStartButton.disabled=true;
+  navStartButton.firstChild.textContent='Checking GPS ';
+  const destinationId=chosen?.id;
+  navigator.geolocation.getCurrentPosition(position=>{
+    if(chosen?.id!==destinationId)return;
+    const point=[position.coords.longitude,position.coords.latitude];
+    const snap=computePolylineProgress(route.coordinates,point);
+    if(!snap || snap.distance>170 || position.coords.accuracy>100){
+      setRouteStatus('Your current GPS position is far from this route or inaccurate. Refresh routes from your GPS, then tap Start.',true);
+      refreshNavigationStart();return;
+    }
+    Object.assign(navigation,{
+      active:true,destinationId,route,lastCoords:point,
+      lastProgress:Math.max(0,snap.fraction*route.meters),
+      lastUpdate:Date.now(),lastCamera:0,lastBearing:null,follow:true,
+      turnIndex:-1,offCount:0,offRoute:false,voiced:false,announcedArrival:false,
+      markerPoint:point,spoken:new Set(),lastPosition:position
+    });
+    // Search-keyboard scroll recovery can leave iOS visually shifted.
+    // Restore the map viewport before showing the fixed-position navigation HUD.
+    window.scrollTo(0,0);
+    document.documentElement.scrollTop=0;
+    document.body.scrollTop=0;
+    appRoot.scrollTop=0;
+    myarahRecoverViewport();
+    appRoot.classList.add('navigation-active');
+    navHud.hidden=false;navFooter.hidden=false;
+    $('navFollow').textContent='Following';
+    showUserLocation(point);
+    refreshNavigationGuidance(navigation.lastProgress);
+    refreshNavTrip(navigation.lastProgress);
+    followNavigationCamera(point,snap.bearing,true);
+    try{
+      navigation.watchId=navigator.geolocation.watchPosition(onNavigationLocation,err=>{
+        if(!navigation.active)return;
+        if(err.code===1){endNavigation('Location permission lost — navigation ended');return;}
+        updateNavAlert('GPS temporarily unavailable. Keep the app open and check your location.');
+      },{enableHighAccuracy:true,maximumAge:1000,timeout:15000});
+    }catch(_){endNavigation('Could not start live GPS tracking');}
+    refreshNavigationStart();
+  },err=>{
+    setRouteStatus(err.code===1?'Allow Location access to start navigation.':'Could not get an accurate GPS fix. Try again.',true);
+    refreshNavigationStart();
+  },{enableHighAccuracy:true,maximumAge:2000,timeout:14000});
+}
+
+async function recalculateNavigation(){
+  if(!navigation.active||navigation.rerouting||!trafficKey||!chosen||!navigation.lastCoords)return;
+  const since=Date.now()-navigation.lastReroute;
+  if(since<30000){updateNavAlert('Please wait before recalculating again.');return;}
+  navigation.rerouting=true;navigation.lastReroute=Date.now();
+  const button=$('navReroute');button.disabled=true;button.textContent='Updating…';
+  const destinationId=navigation.destinationId,origin=[...navigation.lastCoords];
+  updateNavAlert('Finding a new route from your GPS…');
+  const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),20000);
+  try{
+    const body={
+      routePlanningLocations:{origin:{type:'Point',coordinates:origin},destination:{type:'Point',coordinates:chosen.coords}},
+      routeType:'fast',travelMode:'car',traffic:'live',departureDateTime:'now',maxPathAlternativeRoutes:0,
+      guidance:'instructions',instructionPhonetics:'ipa'
+    };
+    const response=await fetch(ROUTE_ENDPOINT,{
+      method:'POST',cache:'no-store',signal:controller.signal,
+      headers:{'Content-Type':'application/json','TomTom-Api-Key':trafficKey,'Accept-Language':'en-GB','Attributes':'routes'},
+      body:JSON.stringify(body)
+    });
+    if(!response.ok)throw new Error(describeRouteError(response));
+    const routes=normalizeProviderRoutes(await response.json());
+    if(!navigation.active||navigation.destinationId!==destinationId)return;
+    const route=routes[0];
+    if(!route?.instructions?.some(i=>i.maneuver!=='depart'))throw new Error('New route has no usable turn instructions.');
+    routeOptions=[route];routeSelected=0;routeOrigin={coords:origin,kind:'gps',label:'Current location'};
+    navigation.route=route;navigation.lastProgress=0;navigation.turnIndex=-1;
+    navigation.spoken.clear();navigation.offCount=0;navigation.offRoute=false;
+    syncRouteLayers();renderRouteCards();
+    const pos=navigation.lastPosition;
+    if(pos)onNavigationLocation(pos);
+    updateNavAlert('Route updated using live traffic where available');
+    setTimeout(()=>{if(navigation.active&&!navigation.offRoute)updateNavAlert('');},3500);
+  }catch(err){
+    if(navigation.active)updateNavAlert(err.name==='AbortError'?'Recalculation timed out. Try again.':err.message||'Recalculation failed.');
+  }finally{
+    clearTimeout(timeout);navigation.rerouting=false;
+    button.disabled=false;button.textContent='Recalculate';
+  }
+}
+
+navStartButton.addEventListener('click',startNavigation);
+$('navEnd').addEventListener('click',()=>endNavigation());
+$('navFollow').addEventListener('click',()=>{
+  navigation.follow=true;
+  $('navFollow').textContent='Following';
+  if(navigation.lastCoords)followNavigationCamera(navigation.lastCoords,navigation.lastBearing,true);
+});
+map.on('dragstart',event=>{
+  if(navigation.active && event.originalEvent){navigation.follow=false;$('navFollow').textContent='Recenter';}
+});
+$('navReroute').addEventListener('click',()=>void recalculateNavigation());
+$('navSound').addEventListener('click',()=>{
+  if(!('speechSynthesis' in window)){toast('Voice directions are not supported in this browser');return;}
+  navigation.voiced=!navigation.voiced;
+  const button=$('navSound');
+  button.textContent=navigation.voiced?'Voice on':'Voice off';
+  button.setAttribute('aria-pressed',String(navigation.voiced));
+  if(navigation.voiced){
+    speakDirection('Voice guidance enabled');
+  }else if('speechSynthesis' in window){
+    try{window.speechSynthesis.cancel();}catch(_){}
+  }
+});
+document.addEventListener('visibilitychange',()=>{
+  if(!navigation.active)return;
+  if(document.hidden){
+    if('speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
+  }else{
+    updateNavAlert('Check your position and route after returning to MyArah.');
+    map.resize();
+    if(navigation.lastCoords)followNavigationCamera(navigation.lastCoords,navigation.lastBearing,true);
+  }
+});
+window.addEventListener('pagehide',()=>{
+  if(navigation.active)endNavigation('Navigation ended');
+});
+refreshNavigationStart();
+resetRouteComparison();

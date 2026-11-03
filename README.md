@@ -22,7 +22,7 @@ A minimal, premium, iPhone-first map prototype with an interactive map. Inspired
 No build step, package manager, server, or API key is required for basic place search. TomTom traffic still requires your own key on your device. Internet access is needed for MapLibre, OpenFreeMap map tiles and 3D building vector data. Switching light/dark rebuilds the 3D overlay automatically.
 
 ## Using the bottom panel
-- At launch, the sheet takes up only enough space for **Where to?** and **Find a destination**.
+- At launch, the sheet stays compact with the **Search Malaysia** control.
 - Drag the handle or the heading upward to reveal recent places (after you have searched for some); drag again to expand. Drag downward to collapse.
 - Tap the small handle to cycle through **compact → medium → expanded → compact**.
 - Once expanded, scroll **inside** the panel vertically; the map behind it remains pannable outside the panel.
@@ -31,9 +31,9 @@ No build step, package manager, server, or API key is required for basic place s
 
 ## Limitations
 - Search uses Nominatim/OpenStreetMap place data and may miss businesses, addresses, or postcodes that have not been mapped. The public endpoint is for low-volume testing, not a scaled production app.
-- Live traffic overlay is optional with a TomTom key. Driving routes, turn-by-turn navigation, spoken directions, flood/toll data and traffic-aware routing are not yet implemented.
+- Traffic overlay, traffic-aware route comparison, and foreground turn-by-turn guidance require a TomTom key with the relevant products enabled. Independently verified flood conditions and complete local hazard information are not included.
 - The 3D toggle tilts and rotates the map, zooms closer when needed, and overlays real extruded building geometry from OpenFreeMap where mapped. Some locations have no 3D building geometry; this is **not** 3D terrain.
-- GPS is a one-time location fix, not continuous navigation tracking.
+- The Location button takes a one-time GPS fix; **Start navigation** uses continuous GPS while this web app remains open in the foreground.
 - Public tile/demo hosting has usage terms and limits. For a production navigation service, select a properly licensed map tile provider and routing/geocoding APIs.
 
 ## Credits
@@ -180,7 +180,7 @@ After searching for and selecting a destination, press **Compare driving routes*
 - The route cards show ETA, distance, traffic delay if reported, and whether toll sections were reported. Blue = selected route, grey = other routes. Tap a card to highlight its exact geometry.
 - TomTom calculates routes using live traffic and closures where data is available (`traffic: live`, `routeType: fast`, `maxPathAlternativeRoutes: 2`). It may return **one or two**, not necessarily three. We never invent alternatives or road delays.
 - The existing traffic-overlay **TomTom API key** is reused only from this browser's local storage; it is **not embedded in the project**. Routing may require the Routing API product to be enabled on your key and is subject to a **separate usage quota/billing** from traffic raster tiles. Configure your TomTom key using the existing Traffic settings.
-- Route preview does **not** implement live turn-by-turn navigation or automatic route recalculation. Times are estimates that can change; traffic and closures may be incomplete. Flooding or local incidents are **not independently verified**.
+- The route preview now offers **Start navigation**, using TomTom guidance instructions and foreground GPS tracking; off-route recalculation is a manual action. Times are estimates; traffic, closures, flooding and local incidents may be incomplete or unverified.
 - TomTom uses its **Orbis routing v3 POST API**: https://docs.tomtom.com/routing-api/documentation/tomtom-orbis-maps/v3/calculate-route . The API must permit browser requests from your GitHub Pages origin. If CORS or key restrictions block a request, MyArah shows an error instead of fake route data.
 - **Safety/privacy:** your trip start and destination coordinates are sent to TomTom only when you request a route. Don't expose the API key in GitHub; use approved key restrictions or a backend for public deployment. Your key remains visible to your own browser's network requests.
 - Keep all four files together in your repository root. `index.html` contains a versioned `app.js` and `styles.css` reference to avoid stale iPhone caching.
@@ -275,3 +275,24 @@ compass, or bottom-sheet design.
 - Recent-history removal is local to this iPhone and needs no external service. Full search remains manually submitted to Nominatim (no per-keystroke autocomplete).
 - Contrast and readability have been preserved for both light and dark appearance. Test keyboard movement on a real iPhone as viewport behavior varies by iOS version.
 - Only the search interface, its viewport styling, and recent history controls were changed; existing traffic, GPS, 2D/3D, routing and compass features stay intact.
+
+
+## Turn-by-turn navigation preview (foreground only)
+
+This update adds **real provider maneuver instructions**, a continuous GPS watch, smoother live camera follow, optional voice prompts, a compact maneuver banner, a trip footer with remaining distance/approximate ETA, and a controlled manual reroute button when the GPS stays off-route. It is built on the last uploaded MyArah project; search, recent swipe-to-delete, traffic, 2D/3D, pins, the compass, and the iOS keyboard fix remain intact.
+
+### Getting started
+1. Open Traffic settings, save a TomTom key **with Orbis Routing v3 access** (subject to routing quota and pricing). No key is embedded in this GitHub package.
+2. Search a destination and tap **Compare driving routes**. Allow precise location when prompted.
+3. Select a route and tap **Start navigation**. The app checks GPS accuracy and proximity to the route. A manually chosen start point is only a preview: MyArah will request a route from current GPS before navigation.
+4. Keep MyArah **open in the foreground**. The map eases toward your current position and upcoming maneuver, with voice directions opt-in. Tap **Recenter** after manually moving the map; tap **End** to stop GPS tracking.
+5. When you are repeatedly off-route, the **Recalculate** button becomes available. It uses a new TomTom route request and may count against your quota. It does **not** automatically reroute in the background.
+
+### Technical details and limitations
+- TomTom Orbis Routing v3: requests `guidance: instructions`, `instructionPhonetics: ipa`, `Accept-Language: en-GB` and `Attributes: routes`. These are required to obtain guidance messages and offsets. [Official documentation](https://docs.tomtom.com/routing-api/documentation/tomtom-orbis-maps/v3/guidance-instructions).
+- GPS: `navigator.geolocation.watchPosition` on HTTPS; updates and permissions depend on browser and device. Marker and map camera animation ease between GPS fixes. Poor GPS readings pause turn progress to avoid giving misleading directions.
+- Maneuvers come from the **TomTom response**, not from guessed route geometry. The client approximates position along the returned route using GPS geometry; that is *not* precision map matching or lane guidance. An off-route condition requires several consecutive GPS fixes, and rerouting is manual.
+- Time remaining is **an estimate from the original traffic-aware route duration scaled by remaining distance**, not a constantly recomputed live ETA.
+- Text-to-speech uses the Web Speech API (if available) only when activated; it may be interrupted by iOS, silent mode, or browser policies.
+- **Not a safety-certified navigation system.** Do not rely on this web prototype as the sole navigation aid while driving; obey signs and rules. Test it as a passenger or while stationary before any real-world use. The PWA does **not** promise background tracking, lock-screen directions, CarPlay or accurate lane-level positioning. No autonomous driving or automated traffic hazard detection is included.
+- The key stored in browser storage is visible in the browser's own requests. A public app should use an appropriate proxy and provider-approved access restrictions.

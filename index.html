@@ -11,8 +11,8 @@
   <title>MyArah — Explore Malaysia</title>
   <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=myarah-search-keyboard-2">
-  <script type="module" src="app.js?v=myarah-search-keyboard-2"></script>
+  <link rel="stylesheet" href="styles.css?v=myarah-nav-1">
+  <script type="module" src="app.js?v=myarah-nav-1"></script>
 </head>
 <body>
   <main class="app" aria-label="MyArah map">
@@ -75,8 +75,9 @@
             <p id="routeDestination" class="route-destination"></p>
             <p id="routeStatus" class="route-status" role="status" aria-live="polite">Choose a starting point.</p>
             <div id="routeCards" class="route-cards" role="group" aria-label="Suggested routes"></div>
+            <button id="navStart" class="nav-start" type="button" disabled hidden>Start navigation <span aria-hidden="true">→</span></button>
             <button id="routePickOrigin" type="button" class="route-pick-origin">Choose start on map</button>
-            <p class="route-disclaimer">Travel times are estimates from TomTom live and historical traffic where available. Road conditions may change. No turn-by-turn guidance yet.</p>
+            <p class="route-disclaimer">Travel times are estimates from TomTom live and historical traffic where available. Road conditions may change. Navigation is a foreground preview; keep your attention on the road.</p>
           </section>
           <div id="recentSection" class="recent-section" hidden>
             <div class="section-caption">RECENT PLACES</div>
@@ -85,6 +86,28 @@
           <button id="trafficConfigure" class="traffic-settings-row" type="button"><span class="traffic-settings-icon" aria-hidden="true">≋</span><span>Traffic settings</span><span aria-hidden="true">›</span></button>
           <div class="sheet-footer"><div class="status-dot"></div><span id="placeSubtitle">Map ready · Malaysia</span><button id="recenter" aria-label="Show selected place">View <span aria-hidden="true">↗</span></button></div>
         </div>
+      </div>
+    </section>
+    <section id="navHud" class="nav-hud" aria-label="Turn-by-turn directions" hidden>
+      <div class="nav-hud-turn surface">
+        <div id="navTurnSymbol" class="nav-turn-symbol" aria-hidden="true">↑</div>
+        <div class="nav-turn-copy">
+          <span id="navTurnDistance" class="nav-turn-distance">Finding route…</span>
+          <strong id="navTurnText" class="nav-turn-text">Preparing navigation</strong>
+        </div>
+      </div>
+      <p id="navAlert" class="nav-alert" role="status" aria-live="polite" hidden></p>
+    </section>
+    <section id="navFooter" class="nav-footer surface" aria-label="Navigation controls" hidden>
+      <div class="nav-trip-details">
+        <strong id="navRemaining">—</strong>
+        <span id="navEta">ETA —</span>
+      </div>
+      <div class="nav-footer-buttons">
+        <button id="navSound" type="button" aria-label="Enable spoken directions" aria-pressed="false" title="Voice directions">Voice off</button>
+        <button id="navFollow" type="button" aria-label="Follow my location" title="Follow location">Follow</button>
+        <button id="navReroute" type="button" hidden>Recalculate</button>
+        <button id="navEnd" type="button" class="nav-end">End</button>
       </div>
     </section>
     <div class="toast" id="notice" role="status" aria-live="polite" hidden></div>
