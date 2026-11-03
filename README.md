@@ -562,3 +562,22 @@ Aligned the left edge of the speedometer with the existing trip-summary glass pi
 - TomTom Orbis Routing v3 gives toll sections but **does not provide Malaysian toll prices**. MyArah displays `RM —` (unavailable) for each entry, not fabricated fares. Rates depend on vehicle class, operator, and often the exact entry/exit plazas.
 - The existing route preview links to the official LLM and PLUS toll calculators to check fees. Neither site is scraped or called from the browser.
 - This update preserves routing, automatic recalculation, ETA, GPS, voice, speed and experimental Liquid Glass code.
+
+
+## Verified Malaysia Class 1 toll rates (November 2026)
+
+The app now uses verified *fixed-rate toll-plaza* fees where the selected TomTom route can be confidently matched to a named plaza. Fares are not guessed from section length. Only Class 1 (car) fees are displayed. A partial, identified-charge total is shown when some tolls are still unmatched.
+
+Built-in auto-match locations and published Class 1 rates (RM):
+- KESAS: Awan Besar East/West, Sunway, Kemuning — RM2.00 each. Operator: https://kesas.com.my/toll-lane/
+- LDP: Penchala, Petaling Jaya, Puchong Barat, Puchong Selatan — RM2.10 each. Operator: https://litrakgroup.com.my/our-highways/litrak/toll-fares/
+- SPRINT: Bukit Kiara — RM3.00. Operator: https://litrakgroup.com.my/our-highways/sprint/toll-fares/
+- GCE: Bukit Jelutong, Elmina, Lagong — RM1.75 each. Operator: https://www.prolintas.com.my/gce/
+- AKLEH: Dato' Keramat — RM2.13. Operator: https://www.prolintas.com.my/akleh/
+- SUKE: Alam Damai toll facilities — RM2.30. Operator: https://www.prolintas.com.my/suke/
+
+Plaza coordinates were cross-checked with operator map data (KESAS) or OSM-based Mapcarta locations. These fixed-rate matches apply only to routes near the specified plaza; unknown plazas continue showing RM —. Toll-road section markers alone do not imply a price. These are examples of supported tolls, not nationwide coverage.
+
+Closed-system roads such as PLUS and LPT require the exact entry and exit plazas. The **optional, collapsed fare lookup** loads Class 1 rates from https://github.com/mohdsyahid/kadar-tol-malaysia (MIT-licensed community mirror of the LLM calculator) only when a user opens it. Choose highway and exact plazas, then check. This is independent from route calculation: **it does not automatically identify the entry/exit, and must never be added to the identified plaza total**. It needs internet access and may be unavailable if the external service changes. Always verify the displayed rate at https://www.llm.gov.my/ or https://www.plus.com.my/ before driving.
+
+No private API keys are embedded. Navigation, glass controls and GPS remain unchanged.

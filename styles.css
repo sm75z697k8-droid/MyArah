@@ -2244,3 +2244,32 @@ body.dark .route-toll-glyph{background:#244e6d;color:#c8eaff}
 body.dark .route-toll-copy small,body.dark .route-toll-note{color:#bdd0df}
 body.dark .route-toll-links a{color:#a4d9ff}
 @media(max-width:365px){.route-toll-links{gap:8px}.route-toll-copy strong{font-size:11px}}
+
+
+/* Class 1 verified flat-plaza toll prices + optional closed-system lookup. */
+.route-toll-known-total[hidden]{display:none!important}
+.route-toll-known-total{margin:5px 0 9px;padding:9px 11px;border-radius:11px;
+  color:#145c90;background:#e0f1ff;border:1px solid #b9dafa;
+  font-size:12px;font-weight:800;line-height:1.45}
+.route-toll-fare.is-verified{color:#12689d}
+.toll-fare-lookup{margin:10px 0;padding:9px 10px;border:1px solid #ccdce8;border-radius:13px;
+  background:rgba(255,255,255,.62);color:#264863}
+.toll-fare-lookup summary{font-weight:800;font-size:12px;cursor:pointer;touch-action:manipulation;
+  padding:5px 0;list-style:revert}
+.toll-fare-lookup p{font-size:11px;line-height:1.5;margin:7px 0;color:#4a677d}
+.toll-fare-lookup>label,.toll-fare-lookup .toll-fare-pair label{display:block;font-size:11px;font-weight:750}
+.toll-fare-lookup select{display:block;width:100%;margin:5px 0 10px;padding:10px 8px;
+  background:#f5faff;color:#193d5c;border:1px solid #b6ccdc;border-radius:9px;
+  font-size:12px;min-height:43px}
+.toll-fare-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.toll-fare-lookup button{min-height:42px;border:0;border-radius:10px;padding:9px 12px;
+  font-weight:800;background:#176cac;color:white;font-size:12px}
+.toll-fare-lookup button:disabled{opacity:.45}
+.toll-fare-lookup a{font-size:11px;color:#1568a5;display:inline-block;margin:4px 0}
+body.dark .route-toll-known-total{color:#bee6ff;background:#193b56;border-color:#437ca8}
+body.dark .route-toll-fare.is-verified{color:#a8e0ff}
+body.dark .toll-fare-lookup{color:#e7f6ff;background:rgba(25,40,57,.87);border-color:#496b82}
+body.dark .toll-fare-lookup p{color:#b9cbdd}
+body.dark .toll-fare-lookup select{color:#ecf8ff;background:#263e55;border-color:#60819b}
+body.dark .toll-fare-lookup a{color:#b8e4ff}
+@media(max-width:350px){.toll-fare-pair{grid-template-columns:1fr}}

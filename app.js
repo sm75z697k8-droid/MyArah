@@ -1379,6 +1379,102 @@ const ROUTE_START_SOURCE = 'myarah-route-start';
 // Orbis v3 does NOT provide a monetary toll price, so never fabricate one.
 const TOLL_MAX_MAP_MARKERS = 22;
 const TOLL_RATE_CHECK_URL = 'https://www.llm.gov.my/';
+// Verified Class 1 fixed/plaza fares (Ringgit). Fares from the highway
+// operators; plaza geocoordinates independently mapped in OSM/Mapcarta.
+// The distance test is NOT sufficient by itself: only match actual TomTom
+// passTollgate maneuvers, or routes also marked as tolled at that location.
+// NOTE: this is not a full Malaysian toll dataset. Closed-system charges
+// require exact entry+exit plazas; never apply a flat fee to PLUS/LPT.
+const CLASS1_PLAZA_FARES = Object.freeze([
+  // KESAS official toll-lane page: toll plazas and their coordinates + RM2.00.
+  {id:'kesas-awan-east',name:'KESAS Awan Besar East',coords:[101.664889,3.058708],rm:2.00,source:'https://kesas.com.my/toll-lane/'},
+  {id:'kesas-awan-west',name:'KESAS Awan Besar West',coords:[101.679266,3.063580],rm:2.00,source:'https://kesas.com.my/toll-lane/'},
+  {id:'kesas-sunway',name:'KESAS Sunway',coords:[101.608303,3.058708],rm:2.00,source:'https://kesas.com.my/toll-lane/'},
+  {id:'kesas-kemuning',name:'KESAS Kemuning',coords:[101.522089,2.997334],rm:2.00,source:'https://kesas.com.my/toll-lane/'},
+  // LITRAK's LDP page confirms all four tolls are RM2.10 for Class 1.
+  {id:'ldp-penchala',name:'LDP Penchala',coords:[101.61925,3.17764],rm:2.10,source:'https://litrakgroup.com.my/our-highways/litrak/toll-fares/'},
+  {id:'ldp-pj',name:'LDP Petaling Jaya',coords:[101.61363,3.06054],rm:2.10,source:'https://litrakgroup.com.my/our-highways/litrak/toll-fares/'},
+  {id:'ldp-puchong-barat',name:'LDP Puchong Barat',coords:[101.60225,3.02089],rm:2.10,source:'https://litrakgroup.com.my/our-highways/litrak/toll-fares/'},
+  {id:'ldp-puchong-selatan',name:'LDP Puchong Selatan',coords:[101.63629,2.98126],rm:2.10,source:'https://litrakgroup.com.my/our-highways/litrak/toll-fares/'},
+  // SPRINT's three plazas have different prices. Only Bukit Kiara is
+  // geolocated with sufficient confidence in this release.
+  {id:'sprint-kiara',name:'SPRINT Bukit Kiara',coords:[101.64297,3.16424],rm:3.00,source:'https://litrakgroup.com.my/our-highways/sprint/toll-fares/'},
+  // PROLINTAS flat toll rates (Class 1), backed by operator publications.
+  {id:'gce-jelutong',name:'GCE Bukit Jelutong',coords:[101.52834,3.12373],rm:1.75,source:'https://www.prolintas.com.my/gce/'},
+  {id:'gce-elmina',name:'GCE Elmina',coords:[101.50726,3.20365],rm:1.75,source:'https://www.prolintas.com.my/gce/'},
+  {id:'gce-lagong',name:'GCE Lagong',coords:[101.53915,3.26219],rm:1.75,source:'https://www.prolintas.com.my/gce/'},
+  {id:'akleh-keramat',name:'AKLEH Dato’ Keramat',coords:[101.72136,3.16524],rm:2.13,source:'https://www.prolintas.com.my/akleh/'},
+  {id:'suke-alam-a',name:'SUKE Alam Damai (A)',coords:[101.73821,3.07511],rm:2.30,source:'https://www.prolintas.com.my/suke/'},
+  {id:'suke-alam-b',name:'SUKE Alam Damai (B)',coords:[101.74141,3.07328],rm:2.30,source:'https://www.prolintas.com.my/suke/'}
+]);
+const CLASS1_FARE_MATCH_RADIUS_M = 175;
+function nearestClass1Plaza(coords, excludedIds = new Set()) {
+  if(!Array.isArray(coords) || coords.length!==2 || !coords.every(Number.isFinite))return null;
+  const candidates=CLASS1_PLAZA_FARES
+    .filter(item=>!excludedIds.has(item.id))
+    .map(item=>({item,meters:haversineMeters(coords,item.coords)}))
+    .filter(match=>match.meters<=CLASS1_FARE_MATCH_RADIUS_M)
+    .sort((a,b)=>a.meters-b.meters);
+  if(!candidates.length)return null;
+  // A very close alternate plaza should not win just because of rounding.
+  // The two SUKE Alam Damai direction facilities are different locations.
+  return candidates[0].item;
+}
+function applyVerifiedClass1Tolls(tollPoints,raw,coords,meters) {
+  const output=tollPoints.map(p=>({...p}));
+  const used=new Set();
+  // Use provider-reported physical tollgate events as primary evidence.
+  for(const gate of output.filter(p=>p.kind==='gate')){
+    const plaza=nearestClass1Plaza(gate.coordinates,used);
+    if(!plaza)continue;
+    Object.assign(gate,{label:plaza.name,price:plaza.rm,rateSource:plaza.source,
+      ratePlazaId:plaza.id,rateClass:1});
+    used.add(plaza.id);
+  }
+  // Some TomTom routes identify toll *sections*, not passTollgate events.
+  // If the selected polyline passes directly through an independently mapped
+  // fixed-rate plaza AND a toll section covers that exact path index, show it.
+  const sections=Array.isArray(raw.sections?.toll)?raw.sections.toll:[];
+  for(const plaza of CLASS1_PLAZA_FARES){
+    if(used.has(plaza.id))continue;
+    const snap=computePolylineProgress(coords,plaza.coords);
+    if(!snap || snap.distance>58 || !Number.isFinite(snap.fraction))continue;
+    const covered=sections.some(section=>{
+      const from=Number(section?.startPathIndex),to=Number(section?.endPathIndex);
+      return Number.isInteger(from) && Number.isInteger(to) &&
+        snap.index+1>=from && snap.index<=to;
+    });
+    if(!covered)continue;
+    const offset=snap.fraction*meters;
+    const existing=output.find(p=>p.kind==='gate' && Math.abs(p.offset-offset)<180);
+    if(existing){
+      if(existing.price===null){
+        Object.assign(existing,{label:plaza.name,price:plaza.rm,rateSource:plaza.source,
+          ratePlazaId:plaza.id,rateClass:1});
+        used.add(plaza.id);
+      }
+      continue;
+    }
+    output.push({kind:'gate',offset,coordinates:routePointAtOffset(coords,offset,meters),
+      label:plaza.name,price:plaza.rm,rateSource:plaza.source,
+      ratePlazaId:plaza.id,rateClass:1});
+    used.add(plaza.id);
+  }
+  // A section beginning at a known gate is only a roadway indicator: do not
+  // show two pins or imply the section is a separate payment.
+  const gates=output.filter(p=>p.kind==='gate' && Number.isFinite(p.price));
+  return output.filter(p=>p.kind!=='section' ||
+    !gates.some(g=>haversineMeters(p.coordinates,g.coordinates)<250))
+    .sort((a,b)=>a.offset-b.offset).slice(0,40);
+}
+function verifiedClass1TollSummary(route){
+  const points=route?.tollPoints||[];
+  const priced=points.filter(p=>p.kind==='gate' && Number.isFinite(p.price));
+  const others=points.length-priced.length;
+  const total=priced.reduce((sum,p)=>sum+p.price,0);
+  return {priced:priced.length,others,total};
+}
+function tollFareLabel(price){return Number.isFinite(price)?`RM ${price.toFixed(2)}`:'RM —';}
 const tollMapMarkers = [];
 let tollMarkerRoute = null;
 
@@ -1514,12 +1610,18 @@ function syncTollMapMarkers(){
       event.stopPropagation();
       const content=document.createElement('div');content.className='myarah-toll-popup';
       const title=document.createElement('strong');title.textContent=point.label;
-      const fee=document.createElement('p');fee.textContent='Fare: not available in TomTom routing data';
-      const note=document.createElement('small');note.textContent=point.kind==='gate'
-        ? 'The tollgate location is based on the route guidance. Verify the fare for your vehicle and trip.'
-        : 'This is the start of a tolled-road section, not necessarily a payment booth.';
-      const link=document.createElement('a');link.href=TOLL_RATE_CHECK_URL;
-      link.target='_blank';link.rel='noopener noreferrer';link.textContent='Check official toll rates ↗';
+      const fee=document.createElement('p');
+      fee.textContent=Number.isFinite(point.price)
+        ? `Class 1 car · ${tollFareLabel(point.price)}`
+        : 'Class 1 car · RM — (plaza not verified)';
+      const note=document.createElement('small');note.textContent=Number.isFinite(point.price)
+        ? 'Published fixed-plaza rate for Class 1 cars. Check for toll changes and route accuracy.'
+        : point.kind==='gate'
+          ? 'Tollgate from routing guidance. Its fee may require matching entry and exit plazas.'
+          : 'Tolled-road section only, not necessarily a payment booth.';
+      const link=document.createElement('a');link.href=point.rateSource||TOLL_RATE_CHECK_URL;
+      link.target='_blank';link.rel='noopener noreferrer';
+      link.textContent=point.rateSource?'View rate source ↗':'Check toll rates ↗';
       content.append(title,fee,note,link);
       new maplibregl.Popup({offset:22,maxWidth:'290px'}).setLngLat(point.coordinates)
         .setDOMContent(content).addTo(map);
@@ -1535,6 +1637,14 @@ function renderSelectedTolls(){
     box.hidden=true;return;
   }
   box.hidden=false;
+  const summary=verifiedClass1TollSummary(route);
+  const summaryEl=$('routeTollKnownTotal');
+  if(summaryEl){
+    summaryEl.hidden=!summary.priced;
+    summaryEl.textContent=summary.priced
+      ? `Identified Class 1 plaza charges: ${tollFareLabel(summary.total)}${summary.others?' · partial total':''}`
+      : '';
+  }
   for(const point of route.tollPoints){
     const row=document.createElement('div');row.className='route-toll-item';
     const glyph=document.createElement('span');glyph.className='route-toll-glyph';
@@ -1545,10 +1655,132 @@ function renderSelectedTolls(){
     distance.textContent=`${routeDistance(point.offset)} from start · ${point.kind==='gate'?'Mapped tollgate':'Toll-road section'}`;
     copy.append(name,distance);
     const fare=document.createElement('span');fare.className='route-toll-fare';
-    fare.textContent='RM —';fare.title='Price not provided by TomTom; check official calculator';
+    fare.textContent=tollFareLabel(point.price);
+    fare.title=Number.isFinite(point.price)
+      ? 'Published Class 1 fixed-plaza fare (check source for changes)'
+      : 'Unmatched toll: entry and exit may be needed for an exact fare';
+    fare.classList.toggle('is-verified',Number.isFinite(point.price));
     row.append(glyph,copy,fare);list.append(row);
   }
 }
+
+// Optional manual fare lookup for CLOSED toll systems (PLUS/LPT/etc).
+// This is a read-only community mirror of LLM's public calculator. It is not
+// used for automatic route matching or the verified plaza total, because
+// TomTom's toll sections cannot identify exact entry and exit plazas.
+const TOLL_FARE_MIRROR = 'https://mohdsyahid.github.io/kadar-tol-malaysia/data';
+const tollFareHighway = $('tollFareHighway');
+const tollFareEntry = $('tollFareEntry');
+const tollFareExit = $('tollFareExit');
+const tollFareResult = $('tollFareResult');
+const tollFareCalculate = $('tollFareCalculate');
+const tollFareCache = new Map();
+let tollFareHighwaysLoaded = false;
+let tollFareCurrentHighway = null;
+let tollFareLoadCounter = 0;
+function setTollFareStatus(text){tollFareResult.textContent=text;}
+function tollFareSelectOptions(select,values,placeholder){
+  select.replaceChildren(new Option(placeholder,''));
+  for(const item of values)select.add(new Option(String(item),String(item)));
+}
+async function getTollFareJson(url){
+  const abort=new AbortController();const timer=setTimeout(()=>abort.abort(),15000);
+  try{
+    const response=await fetch(url,{cache:'no-cache',signal:abort.signal});
+    if(!response.ok)throw new Error(`Rate service returned HTTP ${response.status}`);
+    return await response.json();
+  }finally{clearTimeout(timer);}
+}
+function parseTollHighwayIndex(raw){
+  const records=Array.isArray(raw)?raw:
+    Array.isArray(raw?.highways)?raw.highways:
+    Array.isArray(raw?.data)?raw.data:
+    Array.isArray(raw?.items)?raw.items:[];
+  return records.map(h=>({
+    id:Number(h?.id??h?.highwayId),
+    name:String(h?.name??h?.highway??'').trim(),
+    routeCount:Number(h?.routeCount??h?.routesCount??1)
+  })).filter(h=>Number.isInteger(h.id) && h.id>0 && h.id<1000 &&
+    h.name && h.routeCount>0);
+}
+async function initializeTollFareLookup(){
+  if(tollFareHighwaysLoaded)return;
+  tollFareHighwaysLoaded=true;
+  setTollFareStatus('Loading highway rates…');
+  try{
+    const raw=await getTollFareJson(`${TOLL_FARE_MIRROR}/highways.json`);
+    const highways=parseTollHighwayIndex(raw);
+    if(!highways.length)throw new Error('The rate index was empty');
+    tollFareSelectOptions(tollFareHighway,highways.map(h=>h.name),'Choose a highway');
+    for(let i=0;i<highways.length;i++)tollFareHighway.options[i+1].value=String(highways[i].id);
+    tollFareHighway.disabled=false;
+    setTollFareStatus('Choose your highway, then the exact entry and exit plazas.');
+  }catch(error){
+    tollFareHighwaysLoaded=false;
+    setTollFareStatus('Rates are temporarily unavailable. Please use the official LLM or PLUS calculator.');
+  }
+}
+$('tollFareLookup').addEventListener('toggle',event=>{
+  if(event.currentTarget.open)void initializeTollFareLookup();
+});
+tollFareHighway.addEventListener('change',async()=>{
+  const serial=++tollFareLoadCounter;
+  tollFareCurrentHighway=null;
+  tollFareSelectOptions(tollFareEntry,[],'Loading plazas…');
+  tollFareSelectOptions(tollFareExit,[],'Choose a highway first');
+  tollFareEntry.disabled=true;tollFareExit.disabled=true;tollFareCalculate.disabled=true;
+  const highwayId=Number(tollFareHighway.value);
+  if(!Number.isInteger(highwayId)||highwayId<=0||highwayId>=1000){
+    setTollFareStatus('Choose a highway.');return;
+  }
+  setTollFareStatus('Loading exact entry–exit fares…');
+  try{
+    let raw=tollFareCache.get(highwayId);
+    if(!raw){
+      raw=await getTollFareJson(`${TOLL_FARE_MIRROR}/${highwayId}.json`);
+      tollFareCache.set(highwayId,raw);
+    }
+    if(serial!==tollFareLoadCounter)return;
+    const routes=Array.isArray(raw?.routes)?raw.routes:[];
+    if(!routes.length)throw new Error('No rates for this highway');
+    const entries=[...new Set(routes.map(r=>r.entryPlaza).filter(Boolean))].sort();
+    if(!entries.length)throw new Error('Entry plazas unavailable');
+    tollFareCurrentHighway={raw,routes};
+    tollFareSelectOptions(tollFareEntry,entries,'Select entry');
+    tollFareSelectOptions(tollFareExit,[],'Select entry first');
+    tollFareEntry.disabled=false;
+    setTollFareStatus('Select the entry plaza and exit plaza.');
+  }catch(error){
+    if(serial===tollFareLoadCounter){
+      setTollFareStatus('Unable to load this highway. Try another or check the official calculator.');
+    }
+  }
+});
+tollFareEntry.addEventListener('change',()=>{
+  const exits=[...new Set((tollFareCurrentHighway?.routes||[])
+    .filter(r=>r.entryPlaza===tollFareEntry.value)
+    .map(r=>r.exitPlaza).filter(Boolean))].sort();
+  tollFareSelectOptions(tollFareExit,exits,'Select exit');
+  tollFareExit.disabled=!exits.length;
+  tollFareCalculate.disabled=true;
+  setTollFareStatus('Choose your exit plaza.');
+});
+tollFareExit.addEventListener('change',()=>{
+  tollFareCalculate.disabled=!(tollFareEntry.value&&tollFareExit.value);
+});
+tollFareCalculate.addEventListener('click',()=>{
+  const match=tollFareCurrentHighway?.routes.find(r=>
+    r.entryPlaza===tollFareEntry.value && r.exitPlaza===tollFareExit.value);
+  const rate=match?.rates?.find(r=>Number(r.vehicleClass)===1);
+  const amount=Number(rate?.rateRM);
+  if(!match || rate==null || !Number.isFinite(amount) || amount<0){
+    setTollFareStatus('No verified Class 1 amount for that pair. Check the official calculator.');return;
+  }
+  const sourceDate=String(tollFareCurrentHighway.raw?.generatedAt||'').slice(0,10);
+  setTollFareStatus(`${tollFareLabel(amount)} · Class 1 car · selected entry–exit plazas`+
+    `${/^\d{4}-\d{2}-\d{2}$/.test(sourceDate)?` · dataset ${sourceDate}`:''}. `+
+    'Not linked automatically to the selected MyArah route. Confirm with LLM before travel.');
+});
 
 function syncRouteLayers() {
   const style = map.getStyle();
@@ -1649,7 +1881,8 @@ function normalizeProviderRoutes(payload) {
       .map(item=>({maneuver:item.maneuver,offset:item.routeOffsetInMeters,
         message:typeof item.message==='string'?item.message.trim().slice(0,260):''}))
       .sort((a,b)=>a.offset-b.offset):[];
-    const tollPoints=normalizeRouteTollPoints(raw,coords,meters,instructions);
+    const tollPoints=applyVerifiedClass1Tolls(
+      normalizeRouteTollPoints(raw,coords,meters,instructions),raw,coords,meters);
     return {
       coordinates: coords,
       seconds, meters,
@@ -1681,7 +1914,12 @@ function renderRouteCards() {
     const detailParts=[routeDistance(route.meters)];
     if (route.delay !== null) detailParts.push(route.delay >= 30 ? `+${Math.ceil(route.delay/60)} min traffic` : 'No significant traffic delay');
     else detailParts.push('Traffic estimate included');
-    if (route.toll) detailParts.push(`${route.tollPoints.length} toll indicator${route.tollPoints.length===1?'':'s'} · fare unavailable`);
+    if (route.toll){
+      const tolls=verifiedClass1TollSummary(route);
+      detailParts.push(tolls.priced
+        ? `${tollFareLabel(tolls.total)} identified tolls${tolls.others?' (partial)':''}`
+        : `${route.tollPoints.length} toll indicator${route.tollPoints.length===1?'':'s'} · fare to verify`);
+    }
     detail.textContent=detailParts.join(' · ');
     const lower=document.createElement('div'); lower.className='route-card-bottom';
     lower.textContent = index===routeSelected ? 'Selected · highlighted blue' : 'Tap to preview this route';

@@ -11,8 +11,8 @@
   <title>MyArah — Explore Malaysia</title>
   <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=myarah-malaysia-tolls-1">
-  <script type="module" src="app.js?v=myarah-malaysia-tolls-1"></script>
+  <link rel="stylesheet" href="styles.css?v=myarah-tollrates-1">
+  <script type="module" src="app.js?v=myarah-tollrates-1"></script>
 </head>
 <body>
   <main class="app" aria-label="MyArah map">
@@ -77,8 +77,22 @@
             <div id="routeCards" class="route-cards" role="group" aria-label="Suggested routes"></div>
             <section id="routeTolls" class="route-tolls" aria-label="Tolls on the selected route" hidden>
               <div class="route-tolls-heading"><span class="route-tolls-heading-icon" aria-hidden="true">RM</span><strong>Tolls on this route</strong></div>
+              <p id="routeTollKnownTotal" class="route-toll-known-total" hidden></p>
               <div id="routeTollItems" class="route-toll-items"></div>
-              <p class="route-toll-note">Toll locations come from routing data. Fees are not supplied by TomTom; a tolled-road marker may not be a payment plaza. Class 1 car fares can depend on entry and exit.</p>
+              <p class="route-toll-note">Class 1 cars. RM amounts are shown only when a fixed-rate plaza matches the route; these are identified charges, not a guaranteed complete trip total. Closed-system highways (such as PLUS and LPT) charge by entry and exit. Toll sections are not payment points. Verify your trip with an operator before travel.</p>
+              <details id="tollFareLookup" class="toll-fare-lookup">
+                <summary>Check Class 1 entry–exit fares</summary>
+                <p>This optional lookup uses a community mirror of LLM's calculator, not an automatic route match. Select the exact highway and plazas.</p>
+                <label for="tollFareHighway">Highway</label>
+                <select id="tollFareHighway"><option value="">Open lookup to load highways</option></select>
+                <div class="toll-fare-pair">
+                  <label for="tollFareEntry">Entry plaza<select id="tollFareEntry" disabled><option value="">Choose highway first</option></select></label>
+                  <label for="tollFareExit">Exit plaza<select id="tollFareExit" disabled><option value="">Choose highway first</option></select></label>
+                </div>
+                <button id="tollFareCalculate" type="button" disabled>Check Class 1 fare</button>
+                <p id="tollFareResult" role="status" aria-live="polite">Choose the highway, entry and exit.</p>
+                <a href="https://github.com/mohdsyahid/kadar-tol-malaysia" target="_blank" rel="noopener noreferrer">Data source and limitations ↗</a>
+              </details>
               <div class="route-toll-links"><a href="https://www.plus.com.my/" target="_blank" rel="noopener noreferrer">PLUS toll calculator ↗</a><a href="https://www.llm.gov.my/" target="_blank" rel="noopener noreferrer">LLM toll calculator ↗</a></div>
             </section>
             <button id="navStart" class="nav-start" type="button" disabled hidden>Start navigation <span aria-hidden="true">→</span></button>
