@@ -1943,6 +1943,29 @@ function navigationCueDistances(speed){
 function isArrivalInstruction(instruction){
   return /^arrive/i.test(instruction.maneuver);
 }
+function followingNavInstruction(route,current){
+  if(!route || !current)return null;
+  const eligible=route.instructions.filter(i=>i.maneuver!=='depart');
+  const currentIndex=eligible.indexOf(current);
+  if(currentIndex<0)return null;
+  const next=eligible.slice(currentIndex+1).find(i=>!isArrivalInstruction(i));
+  return next || null;
+}
+function refreshSecondaryNavigationTurn(route,current,distanceToCurrent){
+  const row=$('navNextTurn');
+  if(!row)return;
+  const following=followingNavInstruction(route,current);
+  if(!following || isArrivalInstruction(current)){
+    row.hidden=true;
+    return;
+  }
+  const spanAfter=Math.max(0,following.offset-current.offset);
+  const relativeText=spanAfter<35 ? 'right after' : `in ${navDistance(spanAfter)}`;
+  $('navNextTurnSymbol').textContent=guidanceIcon(following.maneuver);
+  $('navNextTurnText').textContent=following.message || guidanceLabel(following.maneuver);
+  $('navNextTurnDistance').textContent=relativeText;
+  row.hidden=false;
+}
 function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
   const route=navigation.route;
   if(!route)return;
@@ -1962,6 +1985,7 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
   $('navTurnSymbol').textContent=guidanceIcon(next.maneuver);
   $('navTurnDistance').textContent=navDistance(distance);
   $('navTurnText').textContent=next.message || guidanceLabel(next.maneuver);
+  refreshSecondaryNavigationTurn(route,next,distance);
 
   // Only accepted, on-route GPS progress drives this function. An early cue
   // is never treated as spoken while voice is off or Web Speech is unavailable.
@@ -2085,8 +2109,10 @@ function refreshNavTrip(now=Date.now()){
     eta.estimatedArrival+=delta*weight;
   }
   eta.lastRenderAt=now;
-  const arrivingAt=new Date(Math.max(now,eta.estimatedArrival));
-  const clock=arrivingAt.toLocaleTimeString('en-MY',{hour:'numeric',minute:'2-digit'});
+  const arrivalStamp=Number.isFinite(eta.estimatedArrival) ? Math.max(now,eta.estimatedArrival) : now+(Number.isFinite(baseSeconds)?baseSeconds:0)*1000;
+  const arrivingAt=new Date(arrivalStamp);
+  const validTime=Number.isFinite(arrivingAt.getTime());
+  const clock=validTime ? arrivingAt.toLocaleTimeString('en-MY',{hour:'numeric',minute:'2-digit'}) : '—';
   $('navEta').textContent=`ETA ${clock} · ${fresh?'approx.':'GPS delayed'}`;
 }
 
@@ -2249,6 +2275,7 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   navigation.lastCameraBearing=null;navigation.offSince=0;navigation.onCount=0;
   navigation.arrivalCount=0;
   $('navReroute').hidden=true;updateNavAlert('');
+  const nextTurnRow=$('navNextTurn'); if(nextTurnRow) nextTurnRow.hidden=true;
   $('navSound').textContent='Voice off';$('navSound').setAttribute('aria-pressed','false');
   $('navFollow').textContent='Follow';
   refreshNavigationStart();

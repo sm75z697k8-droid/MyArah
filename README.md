@@ -363,3 +363,10 @@ No changes were made to routing, GPS smoothing, search, traffic, or other map fe
 - Starting a new route and recalculating reset pace history and start again from the new TomTom estimate. The interval stops when navigation ends.
 - No additional buttons, requests, API keys, or visual panels. Existing light/dark design, voice, GPS smoothing, traffic layers, search and route timing are unchanged.
 - This is an **approximate** ETA, not continuously rerouted live traffic. Road conditions ahead can change, and GPS gaps may reduce accuracy. Real-device driving tests are still needed.
+
+
+## Landscape navigation refinement
+- Compact left-column navigation layout for landscape orientation, so the map stays visible.
+- Added a “Then” upcoming-turn preview under the main turn card, similar to Apple Maps / Google Maps.
+- Navigation footer buttons reflow into a 2-column grid in landscape for better readability.
+- Added an ETA safety fallback to avoid displaying “Invalid Date”.
