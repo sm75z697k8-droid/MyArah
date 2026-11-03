@@ -1707,7 +1707,8 @@ const navigation = {
   lastBearing:null, markerAnimation:0, markerPoint:null,
   // The camera follows the marker's *displayed* position, not raw GPS jumps.
   cameraState:null, cameraFrame:0,
-  follow:true, voiced:false, spoken:new Set(), turnIndex:-1,
+  follow:true, voiced:false, voiceMode:'normal', spoken:new Set(), turnIndex:-1,
+  alertSpoken:new Set(),
   // Guidance announcements are relative to movement, not fixed road distances.
   // Keep timing state separate from GPS/map smoothing and reset it on reroute.
   guidanceSpeed:null, guidanceSpokenAt:0,
@@ -2290,8 +2291,8 @@ function followNavigationCamera(coords,bearing,force=false){
   scheduleNavigationCamera();
 }
 
-// Calm, concise guidance using voices available on this iPhone/browser.
-// There is no downloaded voice pack, external TTS provider, or extra UI.
+// Prefer natural voices *actually exposed* by iOS/Web Speech. Safari may
+// omit premium Siri and downloaded accessibility voices. No remote TTS key.
 function preferredNavigationVoice(){
   let voices=[];
   try{voices=window.speechSynthesis?.getVoices?.()||[];}catch(_){return null;}
@@ -2305,9 +2306,9 @@ function preferredNavigationVoice(){
     const name=v.name||'';
     const rank=favourites.findIndex(candidate=>name.toLowerCase().includes(candidate));
     const locale=(v.lang||'').replace('_','-').toLowerCase();
-    return (quality.test(name)?30:0)+(rank<0?0:24-rank)+
-      (locale==='en-my'?6:locale==='en-au'?5:locale==='en-gb'?4:2)+
-      (v.localService?2:0)+(v.default?1:0)-(novelty.test(name)?90:0);
+    return (quality.test(name)?70:0)+(rank<0?0:26-rank)+
+      (locale==='en-my'?8:locale==='en-au'?7:locale==='en-gb'?6:3)+
+      (v.localService?3:0)+(v.default?2:0)-(novelty.test(name)?120:0);
   };
   return english.slice().sort((a,b)=>score(b)-score(a))[0];
 }
@@ -2338,8 +2339,19 @@ function spokenTurnInstruction(instruction,distance){
   const lead=distance<35?'Coming up,':`In ${speechDistance(distance)},`;
   return `${lead} ${action[0].toLowerCase()}${action.slice(1)}.`;
 }
-function speakDirection(text,{interrupt=true}={}){
-  if(!text || !navigation.voiced || !navigation.active || document.hidden ||
+// Voice settings: Normal speaks turns and safety alerts, Only Alerts speaks
+// meaningful route/arrival changes, and Off is completely silent.
+const NAV_VOICE_MODE_KEY='myarahVoiceModeV1';
+function loadNavVoiceMode(){
+  try{
+    const saved=localStorage.getItem(NAV_VOICE_MODE_KEY);
+    return ['normal','alerts','off'].includes(saved)?saved:'normal';
+  }catch(_){return 'normal';}
+}
+function speakDirection(text,{interrupt=true,kind='guidance'}={}){
+  if(!text || !navigation.active || document.hidden ||
+      navigation.voiceMode==='off' ||
+      (kind==='guidance' && navigation.voiceMode!=='normal') ||
       !('speechSynthesis' in window)) return false;
   try {
     const synth=window.speechSynthesis;
@@ -2349,13 +2361,20 @@ function speakDirection(text,{interrupt=true}={}){
     const voice=preferredNavigationVoice();
     if(voice)utterance.voice=voice;
     utterance.lang=voice?.lang||'en-GB';
-    utterance.rate=.88; // Keep the calm voice selected in the previous update.
-    utterance.pitch=1.0;
-    utterance.volume=.92;
+    // Overly slow speech can sound stilted. Use a conversational pace.
+    utterance.rate=.98;
+    utterance.pitch=1.01;
+    utterance.volume=1.0;
     if(interrupt)synth.cancel();
     synth.speak(utterance);
     return true;
   }catch(_){return false;/* Safari may refuse or temporarily lack a voice. */}
+}
+function announceNavVoiceAlert(key,text,{interrupt=true}={}){
+  if(!navigation.active || !text || navigation.alertSpoken.has(key))return false;
+  const said=speakDirection(text,{kind:'alert',interrupt});
+  if(said)navigation.alertSpoken.add(key);
+  return said;
 }
 function updateNavAlert(text){
   navAlert.hidden=!text;
@@ -2556,7 +2575,7 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
 
   // Only accepted, on-route GPS progress drives this function. An early cue
   // is never treated as spoken while voice is off or Web Speech is unavailable.
-  if(!navigation.voiced || navigation.offRoute || document.hidden)return;
+  if(navigation.voiceMode!=='normal' || navigation.offRoute || document.hidden)return;
   const windows=navigationCueDistances(speed);
   const phase=distance<=windows.turn?'turn':distance<=windows.prepare?'prepare':null;
   if(!phase)return;
@@ -2745,6 +2764,7 @@ function onNavigationLocation(position){
   const recoveredThreshold=Math.max(22,Math.min(63,accuracy*1.3+14));
   const definitelyOff=match.nearestDistance>offThreshold;
   const clearlyOn=match.valid && match.nearestDistance<recoveredThreshold;
+  const wasConfirmedOffRoute=navigation.offRoute;
   if(navigation.joiningRoute){
     // Do not reroute just because the GPS begins in a mall car park. Wait for
     // two good on-road fixes; GPS may briefly drift across the mapped road.
@@ -2792,6 +2812,9 @@ function onNavigationLocation(position){
       navigation.onCount=0;
       // A marginal GPS fix must not clear a confirmed deviation.
     }
+  }
+  if(!wasConfirmedOffRoute && navigation.offRoute){
+    announceNavVoiceAlert('off-route','You are off the route. Finding another way.');
   }
   $('navReroute').hidden=!navigation.offRoute;
   let display=point;
@@ -2877,8 +2900,9 @@ function onNavigationLocation(position){
   }else navigation.arrivalCount=0;
   if(navigation.arrivalCount>=2 && !navigation.announcedArrival){
     navigation.announcedArrival=true;
-    const finishingWithVoice=navigation.voiced && !document.hidden;
-    speakDirection('You have arrived at your destination.');
+    const finishingWithVoice=navigation.voiceMode!=='off' && !document.hidden &&
+      'speechSynthesis' in window;
+    speakDirection('You have arrived at your destination.',{kind:'alert',interrupt:true});
     endNavigation('Arrived at destination',{finishAnnouncement:finishingWithVoice});
     return;
   }
@@ -2909,9 +2933,11 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   navigation.markerAnimation=0;
   stopNavigationCamera();
   if(!finishAnnouncement && 'speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
+  closeVoiceMenu({immediate:true,restoreFocus:false});
   navHud.hidden=true;navFooter.hidden=true;
   appRoot.classList.remove('navigation-active');
   navigation.follow=true;navigation.voiced=false;navigation.turnIndex=-1;
+  navigation.alertSpoken.clear();
   navigation.spoken.clear();navigation.guidanceSpeed=null;
   navigation.guidanceSpokenAt=0;
   navigation.offCount=0;navigation.offRoute=false;
@@ -2929,7 +2955,7 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   setNavActionLabel('navReroute','Recalculate','Recalculate driving route');
   updateNavAlert('');
   const nextTurnRow=$('navNextTurn'); if(nextTurnRow) nextTurnRow.hidden=true;
-  setNavSoundState(false);
+  setNavSoundState(loadNavVoiceMode());
   setNavFollowState(true);
   refreshNavigationStart();
   setSheetPosition('peek');
@@ -2980,7 +3006,8 @@ function startNavigation(){
       active:true,destinationId,route,lastCoords:point,routeIndex:index,
       lastProgress:Math.max(0,(matched?.along/index.total??snap.fraction)*route.meters),
       lastUpdate:Date.now(),lastCamera:0,lastBearing:null,follow:true,
-      turnIndex:-1,offCount:0,offRoute:false,voiced:false,announcedArrival:false,
+      turnIndex:-1,offCount:0,offRoute:false,voiced:loadNavVoiceMode()!=='off',
+      voiceMode:loadNavVoiceMode(),alertSpoken:new Set(),announcedArrival:false,
       guidanceSpeed:Number.isFinite(position.coords.speed) && position.coords.speed>=0 ?
         position.coords.speed:null,guidanceSpokenAt:0,
       markerPoint:displayed,drawnAlong:matched?.along??null,
@@ -3010,10 +3037,15 @@ function startNavigation(){
       if(navigation.active && !document.hidden) renderNavSpeed();
     },2000);
     setNavFollowState(true);
+    setNavSoundState(navigation.voiceMode);
     showUserLocation(displayed);
     initializeNavEta(route,navigation.lastProgress);
-    if(navigation.joiningRoute)showProceedToRoute(initial?.nearestDistance??snap.distance);
-    else refreshNavigationGuidance(navigation.lastProgress);
+    if(navigation.joiningRoute){
+      showProceedToRoute(initial?.nearestDistance??snap.distance);
+      announceNavVoiceAlert('initial-join','Proceed to the route.',{interrupt:false});
+    }else{
+      refreshNavigationGuidance(navigation.lastProgress);
+    }
     refreshNavTrip();
     // Even if the car is stationary and GPS reports no new coordinates,
     // update the displayed ETA as time passes. No additional map animation.
@@ -3096,7 +3128,7 @@ async function recalculateNavigation({automatic=false}={}){
     routeOrigin={coords:origin,kind:'gps',label:'Current location'};
     navigation.route=route;navigation.routeIndex=index;
     navigation.lastProgress=0;navigation.turnIndex=-1;
-    navigation.spoken.clear();navigation.guidanceSpeed=null;
+    navigation.spoken.clear();navigation.alertSpoken.clear();navigation.guidanceSpeed=null;
     navigation.guidanceSpokenAt=0;
     navigation.offCount=0;navigation.offRoute=false;
     navigation.matchedAlong=null;navigation.drawnAlong=null;
@@ -3110,9 +3142,11 @@ async function recalculateNavigation({automatic=false}={}){
     if(pos)onNavigationLocation(pos);
     if(navigation.joiningRoute){
       showProceedToRoute(newMatch?.nearestDistance);
+      announceNavVoiceAlert('reroute-join','Route updated. Proceed to the route.');
       updateNavAlert('');
     }else{
       refreshNavigationGuidance(navigation.lastProgress);
+      announceNavVoiceAlert('reroute-success','Route updated.');
       updateNavAlert('Route updated');
       setTimeout(()=>{
         if(navigation.active && navigation.sessionToken===token && !navigation.offRoute && !navigation.joiningRoute)updateNavAlert('');
@@ -3122,6 +3156,7 @@ async function recalculateNavigation({automatic=false}={}){
   }catch(err){
     if(navigation.active && navigation.sessionToken===token){
       navigation.autoFailure=true;
+      announceNavVoiceAlert('reroute-failed','Could not update the route. Try again when safe.');
       updateNavAlert(err.name==='AbortError'?
         'Route update timed out. Tap Recalculate to retry.' :
         automatic?'Automatic route update failed. Tap Recalculate to retry.' :
@@ -3153,12 +3188,83 @@ function setNavFollowState(following){
   setNavActionLabel('navFollow',following?'Following':'Recenter',
     following?'Map following my location':'Recenter map and follow my location');
 }
-function setNavSoundState(enabled){
+function setNavSoundState(mode=navigation.voiceMode){
+  const selected=['normal','alerts','off'].includes(mode)?mode:'normal';
   const button=$('navSound');
-  if(button)button.setAttribute('aria-pressed',String(enabled));
-  setNavActionLabel('navSound',enabled?'Voice on':'Voice off',
-    enabled?'Mute spoken directions':'Enable spoken directions');
+  navigation.voiceMode=selected;
+  navigation.voiced=selected!=='off'; // compatibility with existing arrival path
+  if(button){
+    button.dataset.voiceMode=selected;
+    button.setAttribute('aria-pressed',String(selected!=='off'));
+  }
+  const names={normal:'Normal',alerts:'Only Alerts',off:'Off'};
+  setNavActionLabel('navSound',names[selected],`Voice guidance: ${names[selected]}. Open voice settings`);
+  document.querySelectorAll('[data-voice-option]').forEach(option=>{
+    option.setAttribute('aria-pressed',String(option.dataset.voiceOption===selected));
+  });
 }
+function chooseNavVoiceMode(mode,{persist=true}={}){
+  if(!['normal','alerts','off'].includes(mode))return;
+  const previous=navigation.voiceMode;
+  setNavSoundState(mode);
+  if(persist){try{localStorage.setItem(NAV_VOICE_MODE_KEY,mode);}catch(_){}}
+  if(previous!==mode){
+    navigation.spoken.clear();
+    navigation.guidanceSpokenAt=0;
+    if('speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
+    // Do not start speaking a stale instruction just because the menu closed.
+  }
+}
+const voiceMenu=$('voiceMenu');
+const voiceMenuDialog=$('voiceMenuDialog');
+let voiceMenuCloseTimer=null;
+function openVoiceMenu(){
+  if(!navigation.active)return;
+  if(voiceMenuCloseTimer!==null){clearTimeout(voiceMenuCloseTimer);voiceMenuCloseTimer=null;}
+  voiceMenu.classList.remove('closing');
+  voiceMenu.hidden=false;
+  $('navSound').setAttribute('aria-expanded','true');
+  const trigger=$('navSound').getBoundingClientRect();
+  const modal=voiceMenuDialog.getBoundingClientRect();
+  voiceMenuDialog.style.setProperty('--voice-enter-x',`${(trigger.left+trigger.width/2)-(modal.left+modal.width/2)}px`);
+  voiceMenuDialog.style.setProperty('--voice-enter-y',`${(trigger.top+trigger.height/2)-(modal.top+modal.height/2)}px`);
+  const current=voiceMenu.querySelector('[data-voice-option][aria-pressed="true"]');
+  (current||voiceMenuDialog).focus({preventScroll:true});
+}
+function closeVoiceMenu({immediate=false,restoreFocus=true}={}){
+  if(voiceMenuCloseTimer!==null){clearTimeout(voiceMenuCloseTimer);voiceMenuCloseTimer=null;}
+  if(voiceMenu.hidden)return;
+  $('navSound').setAttribute('aria-expanded','false');
+  const finish=()=>{
+    voiceMenu.classList.remove('closing');voiceMenu.hidden=true;
+    if(restoreFocus && navigation.active)$('navSound').focus({preventScroll:true});
+  };
+  if(immediate || window.matchMedia('(prefers-reduced-motion: reduce)').matches){finish();return;}
+  voiceMenu.classList.add('closing');
+  voiceMenuCloseTimer=setTimeout(()=>{voiceMenuCloseTimer=null;finish();},190);
+}
+$('voiceMenuClose').addEventListener('click',()=>closeVoiceMenu());
+voiceMenu.querySelector('[data-voice-dismiss]').addEventListener('click',()=>closeVoiceMenu());
+voiceMenu.querySelectorAll('[data-voice-option]').forEach(option=>{
+  option.addEventListener('click',()=>{
+    chooseNavVoiceMode(option.dataset.voiceOption);
+    closeVoiceMenu();
+  });
+});
+voiceMenu.addEventListener('keydown',event=>{
+  if(event.key==='Escape'){
+    event.preventDefault();closeVoiceMenu();return;
+  }
+  if(event.key==='Tab'){
+    const controls=[...voiceMenu.querySelectorAll('button:not([disabled])')];
+    const first=controls[0],last=controls[controls.length-1];
+    if(event.shiftKey && document.activeElement===first){event.preventDefault();last.focus();}
+    else if(!event.shiftKey && document.activeElement===last){event.preventDefault();first.focus();}
+  }
+});
+// Persist only the chosen mode. The default is Normal, even before any setting
+// has ever been saved. Navigation alone activates spoken directions.
+setNavSoundState(loadNavVoiceMode());
 navStartButton.addEventListener('click',startNavigation);
 $('navEnd').addEventListener('click',()=>endNavigation());
 $('navFollow').addEventListener('click',()=>{
@@ -3170,23 +3276,7 @@ map.on('dragstart',event=>{
   if(navigation.active && event.originalEvent){navigation.follow=false;stopNavigationCamera();setNavFollowState(false);}
 });
 $('navReroute').addEventListener('click',()=>void recalculateNavigation());
-$('navSound').addEventListener('click',()=>{
-  if(!('speechSynthesis' in window)){toast('Voice directions are not supported in this browser');return;}
-  navigation.voiced=!navigation.voiced;
-  const button=$('navSound');
-  setNavSoundState(navigation.voiced);
-  if(navigation.voiced){
-    if(navigation.joiningRoute || navigation.offRoute){
-      speakDirection('Proceed to the route.',{interrupt:false});
-    }else{
-      const before=navigation.guidanceSpokenAt;
-      refreshNavigationGuidance(navigation.lastProgress,navigation.guidanceSpeed);
-      if(navigation.guidanceSpokenAt===before)speakDirection('Voice directions are on.',{interrupt:false});
-    }
-  }else if('speechSynthesis' in window){
-    try{window.speechSynthesis.cancel();}catch(_){}
-  }
-});
+$('navSound').addEventListener('click',openVoiceMenu);
 document.addEventListener('visibilitychange',()=>{
   if(!navigation.active)return;
   if(document.hidden){

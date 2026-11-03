@@ -520,3 +520,16 @@ material is not exposed to GitHub Pages / ordinary web apps.
 
 ## Landscape speedometer alignment
 Aligned the left edge of the speedometer with the existing trip-summary glass pill on notched iPhones, including when experimental optical glass is enabled. Portrait layout, speed reading, and navigation logic are unchanged.
+
+
+## Voice modes — automatic guidance and glass popup (November 2026)
+
+- **Normal (default):** voice guidance automatically enabled when navigation starts. All turn instructions and important route-change / arrival alerts are spoken when the browser allows speech playback.
+- **Only Alerts:** no routine maneuver speech; announces important situations such as leaving the route, route recalculation success/failure, joining a new route, and confirmed arrival.
+- **Off:** all guidance speech is muted. Changing modes cancels any in-progress utterance.
+- Tap the existing circular speaker button in **portrait or landscape** to open a glass popup with three different SVG icons, clear descriptions, selection indicators, backdrop dismissal, and keyboard accessibility. The popup animates from the speaker button toward the middle and supports Reduced Motion.
+- Your last choice is stored as `myarahVoiceModeV1` on this device. A fresh installation defaults to Normal.
+- Speech timing and GPS/route logic remain unchanged, except necessary alert calls.
+- Voice selection prefers better-quality voices when they are returned by the browser; the speech rate is now 0.98 rather than an unnaturally slow 0.88.
+- **WebKit limitation:** Safari's Web Speech API may not expose downloaded Enhanced/Premium/Siri voices. The result cannot be guaranteed to sound like a natural AI voice. A cloud neural TTS service would require a secure server-side proxy for credentials, network access, usage costs and driving latency safeguards; no API key is embedded in this static project.
+- iPhone may refuse speech that starts outside a user interaction or when the app is backgrounded. Selecting voice guidance does not override iOS audio policy.
