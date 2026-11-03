@@ -1761,3 +1761,26 @@ body.dark #navNextTurnSymbol{
   #navTurnSymbol svg{width:32px;height:32px;}
   #navNextTurnSymbol{flex-basis:27px;width:27px;height:27px;}
 }
+
+
+/* === Navigation clarity refinement (light, dark, portrait and landscape) ===
+   Action first; road/exit information second. No change to audio or routing. */
+#navTurnRoad[hidden]{display:none!important;}
+.nav-turn-copy{gap:3px;min-width:0;}
+#navTurnText{font-size:clamp(17px,4.35vw,21px);font-weight:800;letter-spacing:-.025em;line-height:1.18;overflow-wrap:break-word;}
+#navTurnRoad{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:100%;color:#566f89;font-size:13px;font-weight:620;line-height:1.32;letter-spacing:-.005em;overflow-wrap:break-word;}
+body.dark #navTurnRoad{color:#b8d1e7;}
+#navTurnDistance{font-size:14px;letter-spacing:.005em;}
+#navNextTurn .nav-next-label{background:rgba(34,111,183,.09);color:#1b669f;}
+body.dark #navNextTurn .nav-next-label{background:rgba(114,185,241,.19);color:#d4ebff;}
+#navNextTurn .nav-next-text{font-size:13px;font-weight:760;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+@media (orientation:landscape) and (max-height:560px){
+  #navTurnText{font-size:16px;line-height:1.18;}
+  #navTurnRoad{font-size:12px;line-height:1.25;-webkit-line-clamp:2;}
+  #navTurnDistance{font-size:12px;}
+  #navNextTurn .nav-next-text{font-size:12px;}
+}
+@media (max-width:365px) and (orientation:portrait){
+  #navTurnText{font-size:17px;}
+  #navTurnRoad{font-size:12px;}
+}

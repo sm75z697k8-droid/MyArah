@@ -11,8 +11,8 @@
   <title>MyArah — Explore Malaysia</title>
   <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=myarah-maneuver-icons-1">
-  <script type="module" src="app.js?v=myarah-maneuver-icons-1"></script>
+  <link rel="stylesheet" href="styles.css?v=myarah-guidance-clarity-1">
+  <script type="module" src="app.js?v=myarah-guidance-clarity-1"></script>
 </head>
 <body>
   <main class="app" aria-label="MyArah map">
@@ -95,6 +95,7 @@
           <div class="nav-turn-copy">
             <span id="navTurnDistance" class="nav-turn-distance">Finding route…</span>
             <strong id="navTurnText" class="nav-turn-text">Preparing navigation</strong>
+            <span id="navTurnRoad" class="nav-turn-road" hidden></span>
           </div>
         </div>
         <div id="navNextTurn" class="nav-turn-next" hidden>

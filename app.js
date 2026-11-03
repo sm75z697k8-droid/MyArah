@@ -2145,7 +2145,7 @@ function showProceedToRoute(distance){
   showNavManeuverIcon('navTurnSymbol','proceed');
   $('navTurnDistance').textContent=Number.isFinite(distance) ?
     `${navDistance(Math.max(0,distance))} from route` : 'Join the route';
-  $('navTurnText').textContent='Proceed to the route';
+  setNavInstructionCopy('Proceed to the route');
   const next=$('navNextTurn');if(next)next.hidden=true;
 }
 // TomTom Orbis routeOffsetInMeters is the position of the *actual maneuver*,
@@ -2175,6 +2175,69 @@ function navGuidanceInstructions(route){
     return Number.isFinite(total)&&total>0&&i.offset>=total-finalWindow;
   });
 }
+// Navigation text is visually compact, but the original provider message stays
+// untouched for voice guidance. Only split when the maneuver is already known;
+// do not invent a road name or change TomTom's maneuver.
+function conciseNavInstruction(instruction){
+  const code=String(instruction?.maneuver||'');
+  const raw=String(instruction?.message||'').replace(/\s+/g,' ').trim();
+  let action=guidanceLabel(code);
+  if(action==='Follow the route')return {action:raw||action, detail:''};
+  if(!raw)return {action,detail:''};
+
+  // Roundabout exit numbers are important. Preserve the provider's ordinal
+  // rather than replacing it with a vague left/right turn.
+  if(/roundabout/i.test(code)){
+    const exit=raw.match(/\b(?:take|use)\s+(?:the\s+)?(\d+(?:st|nd|rd|th)|first|second|third|fourth|fifth|sixth|seventh|eighth)\s+exit\b/i);
+    if(exit)action=`Take the ${exit[1].toLowerCase()} exit`;
+  }
+
+  // Remove a redundant action phrase only if it matches the provider text.
+  // Leading distances are already in the large distance line of the banner.
+  const message=raw.replace(/^(?:in|after)\s+[\d.,]+\s*(?:kilometres?|kilometers?|metres?|meters?|km|m)\b\s*[,.:;-]?\s*/i,'').trim();
+  let remainder=message;
+  const escapeRe=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const actionRe=new RegExp('^'+escapeRe(action)+'(?:\\b|$)\\s*[,.:;-]?\\s*','i');
+  if(actionRe.test(remainder))remainder=remainder.replace(actionRe,'');
+  else if(/^turn\s+(?:slightly|sharply|sharp|slight)?\s*(?:left|right)\b/i.test(remainder) && /turn/i.test(code))
+    remainder=remainder.replace(/^turn\s+(?:slightly|sharply|sharp|slight)?\s*(?:left|right)\b\s*[,.:;-]?\s*/i,'');
+  else if(/^keep\s+(?:to\s+the\s+)?(?:left|right|centre|center)\b/i.test(remainder) && /keep/i.test(code))
+    remainder=remainder.replace(/^keep\s+(?:to\s+the\s+)?(?:left|right|centre|center)\b\s*[,.:;-]?\s*/i,'');
+  else if(/roundabout/i.test(code) && action.startsWith('Take the '))
+    remainder=remainder.replace(/^.*?\b(?:take|use)\s+(?:the\s+)?(?:\d+(?:st|nd|rd|th)|first|second|third|fourth|fifth|sixth|seventh|eighth)\s+exit\b\s*/i,'');
+  else if(/^continue(?:\s+straight)?\b/i.test(remainder) && /continue/i.test(code))
+    remainder=remainder.replace(/^continue(?:\s+straight)?\b\s*/i,'');
+
+  // Examples: "Turn right onto Jalan Merdeka" -> "Jalan Merdeka";
+  // "Keep left to stay on E14" -> "Stay on E14".
+  const onto=remainder.match(/^(?:onto|on to|into)\s+(.+)$/i);
+  if(onto)remainder=onto[1];
+  else if(/^to\s+stay\s+on\b/i.test(remainder))remainder=remainder.replace(/^to\s+stay\s+on\b\s*/i,'Stay on ');
+  else if(/^towards?\b/i.test(remainder))remainder='Towards'+remainder.replace(/^towards?\b/i,'');
+  else if(/^on\s+\S/i.test(remainder) && /continue/i.test(code))remainder=remainder.replace(/^on\s+/i,'');
+  remainder=remainder.replace(/^[,.;:\s-]+|[,.;:\s-]+$/g,'').trim();
+
+  // Don't print the same action twice; if parsing isn't confident, the provider
+  // message remains as secondary text rather than being silently discarded.
+  if(remainder.toLowerCase()===action.toLowerCase() || remainder.toLowerCase()===raw.toLowerCase() && raw.toLowerCase()===action.toLowerCase())
+    remainder='';
+  return {action,detail:remainder};
+}
+function setNavInstructionCopy(action,detail=''){
+  $('navTurnText').textContent=action;
+  const road=$('navTurnRoad');
+  if(!road)return;
+  const value=String(detail||'').trim();
+  road.hidden=!value;
+  road.textContent=value;
+}
+function isUsefulNextTurn(instruction){
+  if(!instruction || isArrivalInstruction(instruction))return false;
+  const code=String(instruction.maneuver||'');
+  // "Then Continue" and other no-action instructions add visual clutter.
+  return !/^(?:depart|continueStraight|keepCenter|passTollgate)$/i.test(code) &&
+    /(?:turn|keep(?:Left|Right)|merge|exit|roundabout|uTurn|makeUTurn|fork)/i.test(code);
+}
 function nextNavInstruction(route,progress,speed=null){
   const behind=Math.max(9,Math.min(23,(Number.isFinite(speed)?speed:9)*.9));
   const eligible=navGuidanceInstructions(route);
@@ -2197,21 +2260,29 @@ function followingNavInstruction(route,current){
   const eligible=navGuidanceInstructions(route);
   const currentIndex=eligible.indexOf(current);
   if(currentIndex<0)return null;
-  const next=eligible.slice(currentIndex+1).find(i=>!isArrivalInstruction(i));
-  return next || null;
+  const next=eligible.slice(currentIndex+1).find(isUsefulNextTurn);
+  if(!next)return null;
+  // Show the secondary row for an actual follow-up maneuver, not something
+  // kilometres away. Give motorway exits a little more preparation distance.
+  const separation=next.offset-current.offset;
+  const window=/^exitMotorway/i.test(next.maneuver)?750:450;
+  return separation>=0 && separation<=window ? next : null;
 }
 function refreshSecondaryNavigationTurn(route,current,distanceToCurrent){
   const row=$('navNextTurn');
   if(!row)return;
   const following=followingNavInstruction(route,current);
-  if(!following || isArrivalInstruction(current)){
+  // Hide the secondary instruction until the *current* maneuver is reasonably
+  // close too; adjacent turns several kilometres ahead are not urgent yet.
+  if(!following || isArrivalInstruction(current) ||
+      !Number.isFinite(distanceToCurrent) || distanceToCurrent>850){
     row.hidden=true;
     return;
   }
   const spanAfter=Math.max(0,following.offset-current.offset);
   const relativeText=spanAfter<35 ? 'right after' : `in ${navDistance(spanAfter)}`;
   showNavManeuverIcon('navNextTurnSymbol',following.maneuver);
-  $('navNextTurnText').textContent=following.message || guidanceLabel(following.maneuver);
+  $('navNextTurnText').textContent=conciseNavInstruction(following).action;
   $('navNextTurnDistance').textContent=relativeText;
   row.hidden=false;
 }
@@ -2225,7 +2296,7 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
     navigation.turnIndex=-1;
     showNavManeuverIcon('navTurnSymbol','continueStraight');
     $('navTurnDistance').textContent=navDistance(Math.max(0,(Number(route.meters)||0)-progress));
-    $('navTurnText').textContent='Continue along the route';
+    setNavInstructionCopy('Continue along the route');
     const following=$('navNextTurn');if(following)following.hidden=true;
     return;
   }
@@ -2250,13 +2321,14 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
       /left/i.test(next.maneuver+' '+next.message)?'left':null;
     showNavManeuverIcon('navTurnSymbol','arrive');
     $('navTurnDistance').textContent=navDistance(remaining>0?remaining:distance);
-    $('navTurnText').textContent=remaining>180 ? 'Continue towards your destination' :
-      side ? `Destination ahead on the ${side}` : 'Approaching your destination';
+    setNavInstructionCopy(remaining>180 ? 'Continue towards your destination' :
+      side ? `Destination ahead on the ${side}` : 'Approaching your destination');
     const later=$('navNextTurn');if(later)later.hidden=true;
   }else{
     showNavManeuverIcon('navTurnSymbol',next.maneuver);
     $('navTurnDistance').textContent=navDistance(distance);
-    $('navTurnText').textContent=next.message || guidanceLabel(next.maneuver);
+    const display=conciseNavInstruction(next);
+    setNavInstructionCopy(display.action,display.detail);
     refreshSecondaryNavigationTurn(route,next,distance);
   }
 
@@ -2500,7 +2572,7 @@ function onNavigationLocation(position){
   if(navigation.rerouting){
     showProceedToRoute(match.nearestDistance);
     $('navTurnDistance').textContent='Updating route…';
-    $('navTurnText').textContent='Finding a new route';
+    setNavInstructionCopy('Finding a new route');
     updateNavAlert('Recalculating automatically from your location…');
   }else if(navigation.joiningRoute){
     // Keep the raw GPS dot honest: no artificial snapping in a car park.
@@ -2753,7 +2825,7 @@ async function recalculateNavigation({automatic=false}={}){
   const destination=[...chosen.coords];
   updateNavAlert(automatic?'Recalculating automatically…':'Finding a new route from your GPS…');
   $('navTurnDistance').textContent='Updating route…';
-  $('navTurnText').textContent='Finding a new route';
+  setNavInstructionCopy('Finding a new route');
   const nextTurn=$('navNextTurn');if(nextTurn)nextTurn.hidden=true;
   const controller=new AbortController();
   navigation.rerouteController=controller;

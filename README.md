@@ -460,3 +460,13 @@ Permission to use, copy, modify, and/or distribute this software for any purpose
 provided that the copyright and permission notice appear in all copies.
 THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE.
 The SVGs are embedded in `index.html`/`app.js` and require no external download during navigation.
+
+
+## Navigation instruction clarity refinement
+- The turn banner now presents the **maneuver/action** in a strong primary line, with the provider's **road or exit detail** below it where available.
+- The original TomTom wording is still used by voice guidance; this update changes the on-screen presentation only.
+- The **Then** row now shows only meaningful nearby maneuvers (turns, exits, merges, lane-keeping decisions, roundabouts). It skips ordinary “Continue straight”, centre-keeping, and tollgate notices, and hides next steps that are too far away.
+- Roundabout ordinal exit numbers are preserved where supplied by the provider. Unrecognized provider wording is retained as secondary text rather than invented or silently discarded.
+- The car-park “Proceed to the route” and recalculation states clear old road details so stale directions cannot linger.
+- All navigation and search functionality, SVG icons, GPS smoothing, automatic rerouting, traffic, wake-lock, and light/dark layouts remain in place.
+- No extra buttons or API requests. Actual driving/on-device validation is still required.
