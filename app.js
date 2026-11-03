@@ -2083,9 +2083,32 @@ function showProceedToRoute(distance){
 // not an early-warning marker. Only move to the next card after that position.
 // A small speed-related buffer prevents a GPS fix hovering around a junction
 // from switching the card back and forth (route progress is also monotonic).
+// An arrival is a *destination-state* instruction, not a regular turn.
+// TomTom occasionally returns one near the origin or before more maneuvers.
+// Never let it become the active turn while kilometres still remain.
+function isArrivalInstruction(instruction){
+  if(!instruction)return false;
+  const maneuver=String(instruction.maneuver||'');
+  const message=String(instruction.message||'');
+  return /^arrive/i.test(maneuver) ||
+    /\b(?:reached|arrived)\b.{0,55}\bdestination\b/i.test(message) ||
+    /\bdestination\b.{0,55}\b(?:reached|arrived)\b/i.test(message);
+}
+function navGuidanceInstructions(route){
+  if(!Array.isArray(route?.instructions))return [];
+  const total=Number(route.meters);
+  // Preserve genuine destination instructions near the route's final metres.
+  // Filter arrival text at the origin, intermediate waypoints, or elsewhere.
+  const finalWindow=Number.isFinite(total)&&total>0 ? Math.min(250,Math.max(80,total*.035)) : 0;
+  return route.instructions.filter(i=>{
+    if(i.maneuver==='depart' || !Number.isFinite(i.offset))return false;
+    if(!isArrivalInstruction(i))return true;
+    return Number.isFinite(total)&&total>0&&i.offset>=total-finalWindow;
+  });
+}
 function nextNavInstruction(route,progress,speed=null){
   const behind=Math.max(9,Math.min(23,(Number.isFinite(speed)?speed:9)*.9));
-  const eligible=route.instructions.filter(i=>i.maneuver!=='depart');
+  const eligible=navGuidanceInstructions(route);
   return eligible.find(i=>i.offset+behind>=progress) || eligible[eligible.length-1] || null;
 }
 
@@ -2100,12 +2123,9 @@ function navigationCueDistances(speed){
     turn:Math.max(42,Math.min(235,v*8+12))
   };
 }
-function isArrivalInstruction(instruction){
-  return /^arrive/i.test(instruction.maneuver);
-}
 function followingNavInstruction(route,current){
   if(!route || !current)return null;
-  const eligible=route.instructions.filter(i=>i.maneuver!=='depart');
+  const eligible=navGuidanceInstructions(route);
   const currentIndex=eligible.indexOf(current);
   if(currentIndex<0)return null;
   const next=eligible.slice(currentIndex+1).find(i=>!isArrivalInstruction(i));
@@ -2130,7 +2150,16 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
   const route=navigation.route;
   if(!route)return;
   const next=nextNavInstruction(route,progress,speed);
-  if(!next)return;
+  if(!next){
+    // A provider can return an invalid origin/waypoint arrival without any
+    // usable maneuver. Keep safe generic guidance instead of stale text.
+    navigation.turnIndex=-1;
+    $('navTurnSymbol').textContent='↑';
+    $('navTurnDistance').textContent=navDistance(Math.max(0,(Number(route.meters)||0)-progress));
+    $('navTurnText').textContent='Continue along the route';
+    const following=$('navNextTurn');if(following)following.hidden=true;
+    return;
+  }
   const index=route.instructions.indexOf(next);
   const distance=Math.max(0,next.offset-progress);
   if(index!==navigation.turnIndex){
@@ -2142,10 +2171,25 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
       text.classList.add('nav-text-change');
     }
   }
-  $('navTurnSymbol').textContent=guidanceIcon(next.maneuver);
-  $('navTurnDistance').textContent=navDistance(distance);
-  $('navTurnText').textContent=next.message || guidanceLabel(next.maneuver);
-  refreshSecondaryNavigationTurn(route,next,distance);
+  const arrival=isArrivalInstruction(next);
+  const remaining=Math.max(0,(Number(route.meters)||0)-progress);
+  // Arrival announcements are reserved for the separate, GPS-confirmed
+  // arrival handler. Even a valid final arrival instruction must not say
+  // 'you have reached' just because it is the next maneuver in the list.
+  if(arrival){
+    const side=/right/i.test(next.maneuver+' '+next.message)?'right':
+      /left/i.test(next.maneuver+' '+next.message)?'left':null;
+    $('navTurnSymbol').textContent='●';
+    $('navTurnDistance').textContent=navDistance(remaining>0?remaining:distance);
+    $('navTurnText').textContent=remaining>180 ? 'Continue towards your destination' :
+      side ? `Destination ahead on the ${side}` : 'Approaching your destination';
+    const later=$('navNextTurn');if(later)later.hidden=true;
+  }else{
+    $('navTurnSymbol').textContent=guidanceIcon(next.maneuver);
+    $('navTurnDistance').textContent=navDistance(distance);
+    $('navTurnText').textContent=next.message || guidanceLabel(next.maneuver);
+    refreshSecondaryNavigationTurn(route,next,distance);
+  }
 
   // Only accepted, on-route GPS progress drives this function. An early cue
   // is never treated as spoken while voice is off or Web Speech is unavailable.

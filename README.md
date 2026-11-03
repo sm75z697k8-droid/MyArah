@@ -415,3 +415,13 @@ Your TomTom key is still entered on your device and is not bundled in the ZIP.
 - No changes to TomTom API usage, GPS matching, ETA, traffic, arrival detection, UI layout, or routing instructions.
 - Update the repository's `app.js` and `index.html` only. `styles.css` is byte-for-byte unchanged.
 - Test while stationary or as a passenger first; this is an iterative browser navigation prototype and is not validated for driving safety.
+
+
+## Portrait glass navigation & correct arrival guidance
+
+- In portrait, the navigation actions now use the existing embedded Lucide SVG icons in round liquid-glass buttons; no external icon network is required. Voice, Recenter, optional Recalculate and End retain their original behavior. The remaining-distance/ETA pill floats independently above the dock.
+- The landscape layout and existing route, traffic, GPS, camera, keyboard, and wake-lock logic are preserved.
+- Arrival-looking instructions supplied near the beginning or middle of a TomTom route are excluded from live maneuver selection. A valid final arrival instruction is displayed as **Continue towards your destination** or **Destination ahead**, not **You have reached** before actual arrival.
+- The app's original actual-arrival handler still requires multiple accurate GPS readings near the destination and near-complete route progress before finishing navigation.
+- Added CSS contrast adjustments for light and dark map appearances; user-facing navigation actions retain accessible labels even though button text is visually hidden.
+- `index.html` references fresh CSS/JS asset versions to avoid Safari / Home Screen stale cache.
