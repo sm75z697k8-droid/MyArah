@@ -3614,9 +3614,17 @@ function setNavActionLabel(id,label,ariaLabel=label){
 }
 function setNavFollowState(following){
   const button=$('navFollow');
-  if(button)button.dataset.following=following?'true':'false';
-  setNavActionLabel('navFollow',following?'Following':'Recenter',
-    following?'Map following my location':'Recenter map and follow my location');
+  const dock=button?.closest('.nav-footer-buttons');
+  if(!button || !dock)return;
+  // One state drives both the dock layout and accessibility. The button is
+  // intentionally not display:none, allowing the optical glass to contract.
+  button.dataset.following=following?'true':'false';
+  dock.classList.toggle('recenter-visible',!following);
+  button.setAttribute('aria-hidden',following?'true':'false');
+  button.tabIndex=following?-1:0;
+  button.disabled=following;
+  if(following && document.activeElement===button)button.blur();
+  setNavActionLabel('navFollow','Recenter','Recenter map and follow my location');
 }
 function setNavSoundState(mode=navigation.voiceMode){
   const selected=['normal','alerts','off'].includes(mode)?mode:'normal';
@@ -3702,9 +3710,19 @@ $('navFollow').addEventListener('click',()=>{
   setNavFollowState(true);
   if(navigation.markerPoint)followNavigationCamera(navigation.markerPoint,navigation.lastBearing,true);
 });
-map.on('dragstart',event=>{
-  if(navigation.active && event.originalEvent){navigation.follow=false;stopNavigationCamera();setNavFollowState(false);}
-});
+// A real touch / pointer / wheel movement pauses follow and reveals the
+// filled-arrow Recenter button. Programmatic GPS camera movement does not.
+function onManualNavigationMapGesture(event){
+  if(!navigation.active || !navigation.follow || !event.originalEvent)return;
+  navigation.follow=false;
+  stopNavigationCamera();
+  setNavFollowState(false);
+}
+map.on('dragstart',onManualNavigationMapGesture);
+map.on('movestart',onManualNavigationMapGesture);
+map.on('rotatestart',onManualNavigationMapGesture);
+map.on('zoomstart',onManualNavigationMapGesture);
+map.on('pitchstart',onManualNavigationMapGesture);
 $('navReroute').addEventListener('click',()=>void recalculateNavigation());
 $('navSound').addEventListener('click',openVoiceMenu);
 document.addEventListener('visibilitychange',()=>{

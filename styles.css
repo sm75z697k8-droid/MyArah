@@ -2273,3 +2273,96 @@ body.dark .toll-fare-lookup p{color:#b9cbdd}
 body.dark .toll-fare-lookup select{color:#ecf8ff;background:#263e55;border-color:#60819b}
 body.dark .toll-fare-lookup a{color:#b8e4ff}
 @media(max-width:350px){.toll-fare-pair{grid-template-columns:1fr}}
+
+
+/* === MyArah automatic recenter dock: glass kept, two-button resting state ===
+   During GPS follow: Voice · End sit together. After a manual map gesture,
+   the filled-blue Recenter arrow rises between them and pushes them apart.
+   On recenter it sinks back and the outer buttons slide together.
+   Flex width is animated instead of translating the controls off their taps. */
+#navFooter .nav-footer-buttons {
+  --myarah-dock-gap:13px;
+  --myarah-fold-margin:-6.5px;
+  gap:var(--myarah-dock-gap);
+}
+@media (orientation:landscape) and (max-height:560px) {
+  #navFooter .nav-footer-buttons {--myarah-dock-gap:10px;--myarah-fold-margin:-5px;}
+}
+@media (orientation:landscape) and (max-height:560px) and (max-width:780px) {
+  #navFooter .nav-footer-buttons {--myarah-dock-gap:8px;--myarah-fold-margin:-4px;}
+}
+@media (orientation:portrait) and (max-width:365px) {
+  #navFooter .nav-footer-buttons {--myarah-dock-gap:12px;--myarah-fold-margin:-6px;}
+}
+/* Reserve a real target-size button when expanded; avoid display:none,
+   which would skip the width/opacity/vertical movement transitions. */
+#navFooter .nav-footer-buttons #navFollow {
+  flex:0 0 auto;
+  width:var(--myarah-recenter-size,60px);
+  min-width:var(--myarah-recenter-size,60px);
+  height:var(--myarah-recenter-size,60px);
+  min-height:var(--myarah-recenter-size,60px);
+  margin-inline:0;
+  overflow:hidden;
+  opacity:1;
+  visibility:visible;
+  transform:translate3d(0,0,0) scale(1);
+  pointer-events:auto;
+  transition:
+    width 380ms cubic-bezier(.20,.85,.25,1),
+    min-width 380ms cubic-bezier(.20,.85,.25,1),
+    margin 380ms cubic-bezier(.20,.85,.25,1),
+    opacity 220ms ease,
+    transform 380ms cubic-bezier(.20,.85,.25,1),
+    visibility 0s linear;
+}
+@media (orientation:landscape) and (max-height:560px) {
+  #navFooter .nav-footer-buttons {--myarah-recenter-size:56px;}
+}
+@media (orientation:landscape) and (max-height:560px) and (max-width:780px) {
+  #navFooter .nav-footer-buttons {--myarah-recenter-size:52px;}
+}
+@media (orientation:portrait) and (max-width:365px) {
+  #navFooter .nav-footer-buttons {--myarah-recenter-size:54px;}
+}
+#navFooter .nav-footer-buttons:not(.recenter-visible) #navFollow {
+  width:0;
+  min-width:0;
+  margin-inline:var(--myarah-fold-margin);
+  border-width:0;
+  opacity:0;
+  visibility:hidden;
+  transform:translate3d(0,22px,0) scale(.45);
+  pointer-events:none;
+  box-shadow:none;
+  transition:
+    width 360ms cubic-bezier(.34,.0,.55,1),
+    min-width 360ms cubic-bezier(.34,.0,.55,1),
+    margin 360ms cubic-bezier(.34,.0,.55,1),
+    opacity 190ms ease,
+    transform 360ms cubic-bezier(.34,.0,.55,1),
+    visibility 0s linear 360ms;
+}
+/* Maintain visible blue color on light and dark refractive glass. */
+#navFooter .nav-footer-buttons #navFollow .nav-follow-filled {
+  width:29px;
+  height:29px;
+  stroke:none;
+  fill:currentColor;
+  color:#126dbd;
+  transform:rotate(13deg);
+  filter:drop-shadow(0 1px 1px rgba(255,255,255,.55));
+}
+body.dark #navFooter .nav-footer-buttons #navFollow .nav-follow-filled {
+  color:#a6ddff;
+  filter:drop-shadow(0 1px 2px rgba(0,0,0,.30));
+}
+#navFooter .nav-footer-buttons #navFollow:active {
+  transform:translate3d(0,0,0) scale(.92);
+}
+@media (prefers-reduced-motion:reduce) {
+  #navFooter .nav-footer-buttons #navFollow,
+  #navFooter .nav-footer-buttons:not(.recenter-visible) #navFollow {
+    transition:none!important;
+  }
+}

@@ -581,3 +581,16 @@ Plaza coordinates were cross-checked with operator map data (KESAS) or OSM-based
 Closed-system roads such as PLUS and LPT require the exact entry and exit plazas. The **optional, collapsed fare lookup** loads Class 1 rates from https://github.com/mohdsyahid/kadar-tol-malaysia (MIT-licensed community mirror of the LLM calculator) only when a user opens it. Choose highway and exact plazas, then check. This is independent from route calculation: **it does not automatically identify the entry/exit, and must never be added to the identified plaza total**. It needs internet access and may be unavailable if the external service changes. Always verify the displayed rate at https://www.llm.gov.my/ or https://www.plus.com.my/ before driving.
 
 No private API keys are embedded. Navigation, glass controls and GPS remain unchanged.
+
+
+## Animated recenter dock — November 2026
+
+- The **Recenter** control is hidden while MyArah's navigation camera is actively following your location. The dock rests as two circular Liquid Glass controls: **Voice** and **End**.
+- Manually dragging, rotating, pinching, pitching or zooming the map reveals a **filled blue Tabler navigation arrow**, tilted 13° clockwise. The Voice and End buttons smoothly spread apart as the arrow rises into the centre.
+- Tapping the arrow resumes following, slides it down out of view, and brings Voice and End together again.
+- The existing **Recalculate** control remains available if automatic rerouting fails or manual recalculation is needed. Its visibility and behavior are unchanged.
+- Light/dark contrast, 52–60 px touch targets, and Reduced Motion settings are respected. The hidden control is removed from keyboard/screen-reader navigation.
+- All experimental refractive Liquid Glass rendering, toll rates, route guidance, speedometer, GPS, and voice modes are unchanged.
+- Icon: reused **Tabler Icons `navigation-filled`** from MyArah's existing map arrow, MIT License (see existing Tabler credit above). No external icon requests are made.
+
+**Update:** replace `index.html`, `styles.css`, and `app.js`; `README.md` is provided for completeness.
