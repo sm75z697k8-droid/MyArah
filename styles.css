@@ -1240,3 +1240,31 @@ body.dark .nav-footer-buttons #navReroute:not([hidden]){color:#d1edff;background
   .nav-hud,.nav-footer,.nav-text-change{animation:none!important;}
   .nav-start,.nav-footer-buttons button{transition:none!important;}
 }
+
+
+/* Screen awake state: compact, legible feedback in the active navigation footer. */
+.nav-trip-meta { display:flex; flex-direction:column; align-items:flex-end; gap:5px; min-width:0; }
+.nav-trip-meta #navEta { text-align:right; }
+.nav-wake {
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  min-height:26px; padding:4px 9px; border-radius:99px;
+  border:1px solid #aebfd0; background:#e8eff7;
+  color:#344d64; font:inherit; font-size:11px; line-height:1.25;
+  font-weight:750; white-space:nowrap; touch-action:manipulation;
+}
+.nav-wake::before {
+  content:''; width:7px; height:7px; border-radius:50%;
+  background:#71879a; flex:none;
+}
+.nav-wake.is-held { border-color:#87b9a1; background:#e7f5eb; color:#20603b; }
+.nav-wake.is-held::before { background:#1d9354; }
+.nav-wake.is-warning { border-color:#dfae6e; background:#fff2e3; color:#825013; }
+.nav-wake.is-warning::before { background:#cc8734; }
+body.dark .nav-wake { border-color:#627d94; background:#34485b; color:#f1f7fc; }
+body.dark .nav-wake::before { background:#a7c0d2; }
+body.dark .nav-wake.is-held { border-color:#488e6d; background:#234a3b; color:#bbf2d4; }
+body.dark .nav-wake.is-held::before { background:#65d9a0; }
+body.dark .nav-wake.is-warning { border-color:#ad854d; background:#55422f; color:#ffe0aa; }
+body.dark .nav-wake.is-warning::before { background:#ffc16c; }
+.nav-wake:focus-visible { outline:3px solid #428cf1; outline-offset:2px; }
+@media(max-width:365px){ .nav-wake { font-size:10px; padding:4px 7px; } }

@@ -1528,6 +1528,105 @@ const navHud=$('navHud');
 const navFooter=$('navFooter');
 const navAlert=$('navAlert');
 
+// Screen Wake Lock: keep the display awake only during foreground guidance.
+// A request can be rejected or revoked by iOS. Never claim the screen is
+// protected unless a live WakeLockSentinel confirms it.
+let navigationWakeLock = null;
+let navigationWakeDesired = false;
+let navigationWakeGeneration = 0;
+let navigationWakePending = null;
+const navigationWakeButton = $('navWake');
+
+function navigationWakeHeld() {
+  return !!navigationWakeLock && !navigationWakeLock.released;
+}
+function refreshNavigationWakeUI() {
+  if (!navigationWakeButton) return;
+  const held = navigationWakeHeld();
+  const waiting = navigationWakeDesired && !held && !!navigationWakePending;
+  const unsupported = !navigator.wakeLock || typeof navigator.wakeLock.request !== 'function';
+  navigationWakeButton.textContent = held ? 'Screen on' : waiting ? 'Keeping awake…' : navigationWakeDesired ? 'Screen may lock' : 'Keep awake';
+  navigationWakeButton.classList.toggle('is-held', held);
+  navigationWakeButton.classList.toggle('is-warning', navigationWakeDesired && !held && !waiting);
+  navigationWakeButton.setAttribute('aria-pressed', String(held));
+  navigationWakeButton.setAttribute('aria-label', held ? 'Screen awake during navigation. Tap to turn off.' :
+    waiting ? 'Requesting screen wake lock.' :
+    unsupported ? 'Screen wake lock unavailable. Tap for help.' :
+    'Screen may lock. Tap to try keeping it awake.');
+}
+function requestNavigationWakeLock() {
+  if (!navigationWakeDesired || document.hidden) {
+    refreshNavigationWakeUI();
+    return Promise.resolve(false);
+  }
+  if (navigationWakeHeld()) return Promise.resolve(true);
+  if (!navigator.wakeLock || typeof navigator.wakeLock.request !== 'function') {
+    refreshNavigationWakeUI();
+    return Promise.resolve(false);
+  }
+  const generation = navigationWakeGeneration;
+  if (navigationWakePending?.generation === generation) return navigationWakePending.promise;
+  let request;
+  try {
+    // Start the native request directly from the Start Navigation button tap.
+    request = navigator.wakeLock.request('screen');
+  } catch (_) {
+    refreshNavigationWakeUI();
+    return Promise.resolve(false);
+  }
+  const pending = Promise.resolve(request).then(async lock => {
+    if (!navigationWakeDesired || document.hidden || generation !== navigationWakeGeneration) {
+      try { await lock.release(); } catch (_) {}
+      return false;
+    }
+    navigationWakeLock = lock;
+    lock.addEventListener('release', () => {
+      if (navigationWakeLock === lock) navigationWakeLock = null;
+      refreshNavigationWakeUI();
+    });
+    refreshNavigationWakeUI();
+    return true;
+  }).catch(err => {
+    console.warn('Could not keep screen awake:', err?.name || err);
+    refreshNavigationWakeUI();
+    return false;
+  }).finally(() => {
+    if (navigationWakePending?.promise === pending) navigationWakePending = null;
+    refreshNavigationWakeUI();
+  });
+  navigationWakePending = {generation, promise: pending};
+  refreshNavigationWakeUI();
+  return pending;
+}
+function startNavigationWakeLock() {
+  navigationWakeDesired = true;
+  navigationWakeGeneration += 1;
+  return requestNavigationWakeLock();
+}
+function stopNavigationWakeLock() {
+  navigationWakeDesired = false;
+  navigationWakeGeneration += 1; // Invalidate any in-flight request.
+  navigationWakePending = null;
+  const previous = navigationWakeLock;
+  navigationWakeLock = null;
+  refreshNavigationWakeUI();
+  if (previous && !previous.released) {
+    try { void previous.release().catch(() => {}); } catch (_) {}
+  }
+}
+navigationWakeButton.addEventListener('click', () => {
+  if (navigationWakeHeld()) {
+    stopNavigationWakeLock();
+    toast('Keep screen awake turned off');
+    return;
+  }
+  if (navigationWakePending) return;
+  void startNavigationWakeLock().then(held => {
+    if (!held && navigation.active) toast('Screen may lock. Check your iPhone Auto-Lock setting.');
+  });
+});
+refreshNavigationWakeUI();
+
 function refreshNavigationStart(){
   if (!navStartButton) return;
   const selected=routeOptions[routeSelected];
@@ -1949,6 +2048,7 @@ function onNavigationLocation(position){
 }
 
 function endNavigation(message='Navigation ended'){
+  stopNavigationWakeLock();
   if(!navigation.active)return;
   navigation.active=false;
   if(navigation.watchId!==null) navigator.geolocation.clearWatch(navigation.watchId);
@@ -1984,20 +2084,24 @@ function startNavigation(){
     prepareComparison();
     return;
   }
+  // Start the screen wake request synchronously with the user's tap.
+  void startNavigationWakeLock();
   // Confirm we are still near the route before enabling live turn directions.
   navStartButton.disabled=true;
   navStartButton.firstChild.textContent='Checking GPS ';
   const destinationId=chosen?.id;
   navigator.geolocation.getCurrentPosition(position=>{
-    if(chosen?.id!==destinationId)return;
+    if(chosen?.id!==destinationId){stopNavigationWakeLock();refreshNavigationStart();return;}
     const point=[position.coords.longitude,position.coords.latitude];
     const snap=computePolylineProgress(route.coordinates,point);
     if(!snap || snap.distance>170 || position.coords.accuracy>100){
+      stopNavigationWakeLock();
       setRouteStatus('Your current GPS position is far from this route or inaccurate. Refresh routes from your GPS, then tap Start.',true);
       refreshNavigationStart();return;
     }
     const index=routeGeometryIndex(route.coordinates);
     if(!index){
+      stopNavigationWakeLock();
       setRouteStatus('Route geometry unavailable. Compare routes again.',true);
       refreshNavigationStart();return;
     }
@@ -2042,6 +2146,7 @@ function startNavigation(){
     }catch(_){endNavigation('Could not start live GPS tracking');}
     refreshNavigationStart();
   },err=>{
+    stopNavigationWakeLock();
     setRouteStatus(err.code===1?'Allow Location access to start navigation.':'Could not get an accurate GPS fix. Try again.',true);
     refreshNavigationStart();
   },{enableHighAccuracy:true,maximumAge:2000,timeout:14000});
@@ -2120,8 +2225,17 @@ $('navSound').addEventListener('click',()=>{
 document.addEventListener('visibilitychange',()=>{
   if(!navigation.active)return;
   if(document.hidden){
+    // Invalidate in-flight requests too, so returning can request a fresh lock.
+    navigationWakeGeneration += 1;
+    navigationWakePending = null;
+    // The browser revokes screen wake locks when the app is not visible.
+    const previous = navigationWakeLock;
+    navigationWakeLock = null;
+    if (previous && !previous.released) { try { void previous.release().catch(() => {}); } catch (_) {} }
+    refreshNavigationWakeUI();
     if('speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
   }else{
+    if (navigationWakeDesired) void requestNavigationWakeLock();
     updateNavAlert('Check your position and route after returning to MyArah.');
     map.resize();
     if(navigation.markerPoint)followNavigationCamera(navigation.markerPoint,navigation.lastBearing,true);
