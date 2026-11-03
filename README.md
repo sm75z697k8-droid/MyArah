@@ -351,3 +351,15 @@ No changes were made to routing, GPS smoothing, search, traffic, or other map fe
 - Timing history resets after route recalculation, starting and ending navigation.
 - No new UI/buttons, permissions, third-party services or exposed API keys.
 - Test while stationary or as a passenger first; live turn timing depends on GPS accuracy and iOS speech availability.
+
+
+## Improved navigation ETA and remaining distance
+
+- Initial ETA still uses TomTom's traffic-aware travel duration; it is **not** a new live traffic request.
+- During navigation, remaining distance is based on confidently matched route progress, not every noisy GPS sample. Implausible large progress jumps require a second agreeing fix before the distance display advances.
+- Once there is enough reliable movement data, recent pace makes a **bounded, local** ETA adjustment. A few slow streets cannot predict traffic along the entire route; the adjustment covers at most three minutes of the planned remaining driving time.
+- ETA refreshes every 12 seconds while MyArah is open, even while stationary; it moves later if the car is not progressing instead of freezing on an old clock time.
+- After roughly 28 seconds without a reliable matched GPS fix, the footer says **GPS delayed** and holds the last trusted distance. Confirmed off-route travel displays **ETA — · off route** until you rejoin or recalculate.
+- Starting a new route and recalculating reset pace history and start again from the new TomTom estimate. The interval stops when navigation ends.
+- No additional buttons, requests, API keys, or visual panels. Existing light/dark design, voice, GPS smoothing, traffic layers, search and route timing are unchanged.
+- This is an **approximate** ETA, not continuously rerouted live traffic. Road conditions ahead can change, and GPS gaps may reduce accuracy. Real-device driving tests are still needed.

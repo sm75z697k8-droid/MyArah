@@ -1540,6 +1540,8 @@ const navigation = {
   routeIndex:null, matchedAlong:null, drawnAlong:null,
   lastRawFix:null, lastAcceptedTime:0, lastCameraPoint:null,
   lastCameraBearing:null, offSince:0, onCount:0, arrivalCount:0,
+  // Independent ETA state: only reliable on-route fixes update trip progress.
+  eta:null, etaTimer:null,
   lastAlert:''
 };
 const navStartButton=$('navStart');
@@ -1988,16 +1990,106 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
   navigation.spoken.add(key);
   if(phase==='turn')navigation.spoken.add(`${index}-prepare`);
 }
-function refreshNavTrip(progress){
-  const route=navigation.route;
-  if(!route)return;
-  const remaining=Math.max(0,route.meters-progress);
-  $('navRemaining').textContent=navDistance(remaining)+' left';
-  // Planned traffic-adjusted duration scaled by route progress; not a fresh live ETA.
-  const approxSeconds=route.meters>0?route.seconds*remaining/route.meters:0;
-  const eta=new Date(Date.now()+approxSeconds*1000);
-  $('navEta').textContent=`ETA ${eta.toLocaleTimeString('en-MY',{hour:'numeric',minute:'2-digit'})} · approx.`;
+// === MyArah ETA estimator: traffic-aware route baseline + cautious local pace ===
+// No background fetches and no extra UI. Live traffic is reflected in the
+// original TomTom route duration (or refreshed if the driver recalculates).
+// Short-term pace cannot predict traffic on distant roads; apply it only to
+// a small section of the remaining journey, never the entire route.
+const NAV_ETA_SAMPLE_WINDOW_MS = 100000;
+const NAV_ETA_FRESH_MS = 28000;
+const NAV_ETA_REFRESH_MS = 12000;
+function initializeNavEta(route,progress,now=Date.now()){
+  const initial=Math.max(0,Math.min(route.meters,Number(progress)||0));
+  navigation.eta={
+    progress:initial,lastGoodFixAt:now,
+    samples:[{time:now,progress:initial}],
+    pendingJump:null,estimatedArrival:null,lastRenderAt:0,
+    lastPaceCorrection:0
+  };
 }
+function recordNavEtaFix(progress,speed,now=Date.now()){
+  const eta=navigation.eta;
+  if(!eta || !Number.isFinite(progress))return false;
+  const advanced=Math.max(0,Math.min(navigation.route.meters,progress));
+  const dt=Math.max(.1,(now-eta.lastGoodFixAt)/1000);
+  const jump=advanced-eta.progress;
+  const speedBound=Number.isFinite(speed) && speed>=0 ? Math.max(10,speed):30;
+  // Require a second agreeing reading before trusting an implausibly large
+  // progress jump. A GPS snap to the wrong parallel road should not instantly
+  // erase kilometres from the trip counter.
+  if(jump>Math.max(90,speedBound*dt*2.1+55) && dt<18){
+    const pending=eta.pendingJump;
+    if(!pending || now-pending.at>15000 || Math.abs(advanced-pending.progress)>100){
+      eta.pendingJump={progress:advanced,at:now};
+      return false;
+    }
+    // Confirmed new location: accept it, but don't treat the jump as speed.
+    eta.samples=[];
+    eta.estimatedArrival=null;
+    eta.lastPaceCorrection=0;
+  }
+  eta.pendingJump=null;
+  eta.progress=Math.max(eta.progress,advanced);
+  eta.lastGoodFixAt=now;
+  const last=eta.samples[eta.samples.length-1];
+  if(!last || now-last.time>=3500)eta.samples.push({time:now,progress:eta.progress});
+  eta.samples=eta.samples.filter(s=>now-s.time<=NAV_ETA_SAMPLE_WINDOW_MS);
+  return true;
+}
+function navEtaPaceAdjustment(route,eta,baselineSeconds,now){
+  const samples=eta.samples;
+  if(samples.length<2 || now-eta.lastGoodFixAt>NAV_ETA_FRESH_MS ||
+      !Number.isFinite(route.seconds) || route.seconds<=0 || route.meters<=0)return null;
+  const oldest=samples[0],latest=samples[samples.length-1];
+  const seconds=(latest.time-oldest.time)/1000;
+  const progress=Math.max(0,latest.progress-oldest.progress);
+  // Ignore very short observations and stationary GPS drift. A red light is
+  // not evidence that the whole remaining journey will stay at zero speed.
+  if(seconds<28 || progress<45)return 0;
+  const observedSpeed=progress/seconds;
+  if(observedSpeed<.7)return 0;
+  const plannedSpeed=route.meters/route.seconds;
+  const factor=Math.max(.75,Math.min(2.25,plannedSpeed/observedSpeed));
+  const confidence=Math.min(.70,Math.max(.12,(seconds-20)/75))*Math.min(1,progress/150);
+  const nearTermSeconds=Math.min(180,baselineSeconds);
+  const correction=nearTermSeconds*(factor-1)*confidence;
+  // Do not let a short sample overwhelm the provider's traffic-aware ETA.
+  return Math.max(-Math.min(45,baselineSeconds*.15),
+    Math.min(Math.min(150,baselineSeconds*.7),correction));
+}
+function refreshNavTrip(now=Date.now()){
+  const route=navigation.route,eta=navigation.eta;
+  if(!navigation.active || !route || !eta)return;
+  if(navigation.offRoute){
+    $('navRemaining').textContent='Route needs update';
+    $('navEta').textContent='ETA — · off route';
+    eta.estimatedArrival=null;
+    return;
+  }
+  const remaining=Math.max(0,route.meters-eta.progress);
+  $('navRemaining').textContent=navDistance(remaining)+' left';
+  const baseSeconds=route.meters>0 ? Math.max(0,route.seconds)*remaining/route.meters : 0;
+  const fresh=now-eta.lastGoodFixAt<=NAV_ETA_FRESH_MS;
+  const paceCorrection=navEtaPaceAdjustment(route,eta,baseSeconds,now);
+  // If GPS is delayed, preserve the last credible pace adjustment but never
+  // pretend the vehicle has advanced. The ETA clock still moves forward.
+  if(fresh && paceCorrection!==null)eta.lastPaceCorrection=paceCorrection;
+  const rawArrival=now+(baseSeconds+eta.lastPaceCorrection)*1000;
+  if(!Number.isFinite(eta.estimatedArrival))eta.estimatedArrival=rawArrival;
+  else{
+    // Smooth *arrival time*, not distance. Progress and GPS accuracy remain
+    // untouched. A ~16s response avoids jitter from irregular GPS updates.
+    const dt=Math.max(0,Math.min(60,(now-eta.lastRenderAt)/1000));
+    const weight=1-Math.exp(-dt/16);
+    const delta=Math.max(-90000,Math.min(90000,rawArrival-eta.estimatedArrival));
+    eta.estimatedArrival+=delta*weight;
+  }
+  eta.lastRenderAt=now;
+  const arrivingAt=new Date(Math.max(now,eta.estimatedArrival));
+  const clock=arrivingAt.toLocaleTimeString('en-MY',{hour:'numeric',minute:'2-digit'});
+  $('navEta').textContent=`ETA ${clock} · ${fresh?'approx.':'GPS delayed'}`;
+}
+
 function onNavigationLocation(position){
   if(!navigation.active || !navigation.routeIndex)return;
   const point=[position.coords.longitude,position.coords.latitude];
@@ -2103,7 +2195,7 @@ function onNavigationLocation(position){
         navigation.guidanceSpeed*.6 + speed*.4;
     }
     refreshNavigationGuidance(navigation.lastProgress,navigation.guidanceSpeed);
-    refreshNavTrip(navigation.lastProgress);
+    if(clearlyOn && accuracy<=55)recordNavEtaFix(navigation.lastProgress,speed,now);
     const heading=routeHeadingAt(navigation.routeIndex,matchedDisplayAlong,speed);
     bearing=stableRouteBearing(heading,speed);
     updateNavAlert('');
@@ -2112,6 +2204,9 @@ function onNavigationLocation(position){
     // not forced onto the route (e.g. a genuine wrong exit or parallel road).
     updateNavAlert('Checking your position near the route…');
   }
+  // Also refresh for uncertain and off-route readings; an old route's ETA
+  // should never be presented as reliable after a confirmed deviation.
+  refreshNavTrip(now);
   animateNavigationMarker(display,matchedDisplayAlong,elapsedMs);
   if(Number.isFinite(bearing))navigation.lastBearing=bearing;
   followNavigationCamera(display,bearing);
@@ -2137,6 +2232,9 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   navigation.active=false;
   if(navigation.watchId!==null) navigator.geolocation.clearWatch(navigation.watchId);
   navigation.watchId=null;
+  if(navigation.etaTimer!==null)clearInterval(navigation.etaTimer);
+  navigation.etaTimer=null;
+  navigation.eta=null;
   cancelAnimationFrame(navigation.markerAnimation);
   navigation.markerAnimation=0;
   if(!finishAnnouncement && 'speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
@@ -2222,8 +2320,15 @@ function startNavigation(){
     navHud.hidden=false;navFooter.hidden=false;
     $('navFollow').textContent='Following';
     showUserLocation(displayed);
+    initializeNavEta(route,navigation.lastProgress);
     refreshNavigationGuidance(navigation.lastProgress);
-    refreshNavTrip(navigation.lastProgress);
+    refreshNavTrip();
+    // Even if the car is stationary and GPS reports no new coordinates,
+    // update the displayed ETA as time passes. No additional map animation.
+    if(navigation.etaTimer!==null)clearInterval(navigation.etaTimer);
+    navigation.etaTimer=setInterval(()=>{
+      if(navigation.active && !document.hidden)refreshNavTrip();
+    },NAV_ETA_REFRESH_MS);
     followNavigationCamera(displayed,matched?.bearing??snap.bearing,true);
     try{
       navigation.watchId=navigator.geolocation.watchPosition(onNavigationLocation,err=>{
@@ -2276,6 +2381,8 @@ async function recalculateNavigation(){
     // A new route restarts matching at the latest real GPS point, not the
     // obsolete last matched point on the previous route.
     navigation.lastRawFix=null;
+    initializeNavEta(route,0);
+    refreshNavTrip();
     syncRouteLayers();renderRouteCards();
     const pos=navigation.lastPosition;
     if(pos)onNavigationLocation(pos);
@@ -2328,6 +2435,7 @@ document.addEventListener('visibilitychange',()=>{
   }else{
     if (navigationWakeDesired) void requestNavigationWakeLock();
     updateNavAlert('Check your position and route after returning to MyArah.');
+    refreshNavTrip();
     map.resize();
     if(navigation.markerPoint)followNavigationCamera(navigation.markerPoint,navigation.lastBearing,true);
   }
