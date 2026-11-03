@@ -2002,3 +2002,20 @@ body[data-myarah-optical="on"] #navFooter #navFollow[data-following="true"] {
 }
 
 .myarah-glass-label{position:relative;z-index:2;pointer-events:none;}
+
+/* === GPS speedometer + projected-road arrow corrections ===
+   Optical glass must not change the navigation gauge's positioning context.
+   It remains independently overlaid on the map, not in document flow. */
+#navSpeed.nav-speed-gauge,
+body[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
+  position:absolute;
+  flex-shrink:0;
+}
+/* Keep the speed digits above the refraction and preserve dark/light contrast. */
+#navSpeed .nav-speed-number,#navSpeed .nav-speed-unit {
+  position:relative;z-index:3;
+}
+/* The road and icon now move together every rendered frame; a separate 200 ms
+   CSS rotation tween caused the arrow to face an older angle at bends. */
+.myarah-navigation-arrow {transition:opacity 160ms ease;}
+@media (prefers-reduced-motion:reduce){.myarah-navigation-arrow{transition:none;}}

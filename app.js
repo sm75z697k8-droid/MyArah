@@ -622,10 +622,33 @@ let locationCone = null;
 let navigationArrowElement = null;
 let navigationArrowWorldBearing = null;
 let navigationArrowDisplayedAngle = null;
+// A compass bearing alone is not the direction of a road on a *pitched*
+// screen. Perspective distorts the projected road at the edges of the view.
+// Compute the tangent of the exact route geometry at the marker's *rendered*
+// position. Both the arrow and the blue line then use MapLibre's projection.
+function screenRouteArrowAngle(index, along) {
+  if (!index?.segments?.length || !Number.isFinite(along)) return null;
+  const start = routePointAt(index, Math.max(0, along - 7));
+  const end = routePointAt(index, Math.min(index.total, along + 14));
+  if (!start || !end) return null;
+  const a = map.project(start), b = map.project(end);
+  if (![a.x,a.y,b.x,b.y].every(Number.isFinite)) return null;
+  if (Math.hypot(b.x-a.x,b.y-a.y) < 1) return null;
+  // Arrow SVG points toward the top at zero rotation. atan2(x,-y) is the
+  // clockwise screen angle of the projected forward route tangent.
+  return normalizedHeading(Math.atan2(b.x-a.x, a.y-b.y) * 180 / Math.PI);
+}
 function syncNavigationArrowRotation() {
-  if (!navigationArrowElement || !Number.isFinite(navigationArrowWorldBearing)) return;
-  const target = normalizedHeading(navigationArrowWorldBearing - map.getBearing());
-  // Unwrap north crossings, so 359° -> 1° does not spin a full turn.
+  if (!navigationArrowElement) return;
+  const snapped = navigation.active && !navigation.offRoute && !navigation.joiningRoute &&
+    Number.isFinite(navigation.drawnAlong) && navigation.routeIndex;
+  const screenAngle = snapped ? screenRouteArrowAngle(navigation.routeIndex,navigation.drawnAlong) : null;
+  const target = Number.isFinite(screenAngle) ? screenAngle :
+    (Number.isFinite(navigationArrowWorldBearing) ?
+      normalizedHeading(navigationArrowWorldBearing - map.getBearing()) : null);
+  if (!Number.isFinite(target)) return;
+  // Preserve shortest rotation across 0°/360°. No CSS animation lag: the
+  // heading follows the same rendered-frame movement as the road beneath it.
   navigationArrowDisplayedAngle = navigationArrowDisplayedAngle === null ? target :
     navigationArrowDisplayedAngle + smallestAngle(target - navigationArrowDisplayedAngle);
   navigationArrowElement.style.setProperty('--myarah-nav-arrow-angle', `${navigationArrowDisplayedAngle}deg`);
@@ -749,6 +772,8 @@ function showUserLocation(coords) {
 }
 
 map.on('rotate', drawFacingDirection);
+// Reproject the arrow after camera translation, rotation or pitch changes.
+map.on('move', syncNavigationArrowRotation);
 
 $('locate').addEventListener('click', () => {
   if (!navigator.geolocation) { toast('Location is not available'); return; }
@@ -1710,14 +1735,19 @@ const navAlert=$('navAlert');
 // GPS-based speedometer. The browser reports metres/second (sometimes null).
 // Inference is deliberately stricter than the speed used by navigation guidance:
 // a parked car must not appear to accelerate due to ordinary GPS drift.
-const NAV_SPEED_FRESH_MS = 10000;
+const NAV_SPEED_FRESH_MS = 18000;
 function reliableNavSpeed(reported, inferred, accuracy, previousAccuracy, displacement, elapsed) {
-  if (!Number.isFinite(accuracy) || accuracy > 45) return null;
+  // iOS can report GPS speed even when horizontal position accuracy is more
+  // than 45 metres. Don't discard that valid native measurement outright.
+  if (!Number.isFinite(accuracy) || accuracy > NAV_FIX_MAX_ACCURACY_M) return null;
   if (Number.isFinite(reported) && reported >= 0 && reported <= 75) return reported;
+  // Some iPhones do not populate GeolocationCoordinates.speed. Infer it from
+  // *two* fixes only when displacement clearly exceeds their combined error.
+  // Never present GPS jitter from a stationary car as an actual speed.
   if (Number.isFinite(inferred) && inferred >= 0 && inferred <= 55 &&
-      Number.isFinite(previousAccuracy) && accuracy <= 20 && previousAccuracy <= 20 &&
-      elapsed >= 1.5 && elapsed <= 9 &&
-      displacement >= Math.max(15, (accuracy + previousAccuracy) * 1.65)) return inferred;
+      Number.isFinite(previousAccuracy) && accuracy <= 65 && previousAccuracy <= 65 &&
+      elapsed >= 1.5 && elapsed <= 20 &&
+      displacement >= Math.max(22, (accuracy + previousAccuracy) * 1.15)) return inferred;
   return null;
 }
 function renderNavSpeed(now=Date.now()) {
@@ -1738,7 +1768,7 @@ function renderNavSpeed(now=Date.now()) {
 }
 function resetNavSpeed(initialSpeed=null, accuracy=Infinity, now=Date.now()) {
   navigation.speedometer={filtered:null,trustedAt:0,lastSampleAt:0,displayed:undefined};
-  if (Number.isFinite(initialSpeed) && initialSpeed>=0 && initialSpeed<=75 && accuracy<=45) {
+  if (Number.isFinite(initialSpeed) && initialSpeed>=0 && initialSpeed<=75 && accuracy<=NAV_FIX_MAX_ACCURACY_M) {
     navigation.speedometer.filtered=initialSpeed;
     navigation.speedometer.trustedAt=now;
     navigation.speedometer.lastSampleAt=now;
@@ -2075,8 +2105,18 @@ function animateNavigationMarker(coords,along=null,elapsedMs=1000){
   const previous=navigation.markerPoint || coords;
   const from=[...previous],to=[...coords];
   const fromAlong=navigation.drawnAlong;
-  const pathAnimation=Number.isFinite(fromAlong) && Number.isFinite(along) &&
-    navigation.routeIndex && Math.abs(along-fromAlong)<180;
+  const hasMatchedTarget=Number.isFinite(along) && !!navigation.routeIndex;
+  const pathAnimation=hasMatchedTarget && Number.isFinite(fromAlong) &&
+    Math.abs(along-fromAlong)<180;
+  if(hasMatchedTarget && !pathAnimation){
+    // A recovered/large GPS jump must not draw a straight shortcut through
+    // buildings or alongside a different road. Place it on the selected
+    // route immediately, then smoothly resume normal route-path animation.
+    navigation.markerPoint=routePointAt(navigation.routeIndex,along)||to;
+    navigation.drawnAlong=along;
+    showUserLocation(navigation.markerPoint);
+    return;
+  }
   const start=performance.now();
   // Keep animation slightly shorter than an ordinary GPS interval, preventing
   // overlapping easing that makes motion lag behind the car.
@@ -2692,7 +2732,11 @@ function onNavigationLocation(position){
   navigation.lastRawFix={point:[...point],accuracy,speed,stamp};
   navigation.lastPosition=position;
   navigation.lastAcceptedTime=now;
-  updateNavSpeed(reportedSpeed,inferredSpeed,accuracy,previous?.accuracy,
+  // Keep the existing conservative navigation speed for guidance/rerouting.
+  // The speedometer may use a longer, independent GPS sample interval when
+  // the browser does not supply native speed (e.g. iOS sparse callbacks).
+  const dialInferredSpeed = previous && dt>=1.5 && dt<=20 ? displacement/dt : null;
+  updateNavSpeed(reportedSpeed,dialInferredSpeed,accuracy,previous?.accuracy,
     displacement,dt,now);
   // Keep RAW location as the origin for recalculation. Do not reroute from a
   // point artificially snapped onto the old road.

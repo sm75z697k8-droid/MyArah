@@ -507,3 +507,12 @@ material is not exposed to GitHub Pages / ordinary web apps.
 - Test while parked or as a passenger, particularly camera movement and
   scrolling, and compare `?glass=off`. The extra GPU work may not be worth
   the effect; the faster version is always available.
+
+
+## Speedometer visibility and map-arrow alignment fix
+- Corrected an experimental Liquid Glass CSS specificity conflict that moved the navigation speedometer from its absolute map position into normal page flow. It now remains visible as a circular `km/h` dial whenever navigation is active, including with optical refraction enabled. If speed is unavailable, the dial displays a dash.
+- Accepts the browser's valid native GPS speed with the existing 85 m positioning-accuracy threshold instead of 45 m; when iOS omits speed, uses conservative two-fix displacement estimates (up to 20 seconds apart) to avoid false readings from stationary GPS drift. It remains an approximation, not a calibrated speedometer.
+- Navigation arrow orientation now follows the projected tangent of the **selected route** at the marker's animated progress, accounting for MapLibre's map pitch, bearing and perspective. When not safely matched, it retains the existing heading behavior rather than falsely snapping to the old route.
+- Large GPS corrections no longer animate the matched arrow in a straight line across corners; they snap to the actual polyline, then resume normal along-route smoothing.
+- Removed extra CSS rotation lag during bends. Off-route detection, traffic, map styles, search, screen wake, glass effect and navigation controls remain unchanged.
+- For performance comparison, `?glass=off` still disables experimental refraction.
