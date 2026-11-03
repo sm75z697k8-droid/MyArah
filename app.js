@@ -1843,14 +1843,68 @@ function followNavigationCamera(coords,bearing,force=false){
   });
 }
 
+// Calm, concise guidance using voices available on this iPhone/browser.
+// There is no downloaded voice pack, external TTS provider, or extra UI.
+function preferredNavigationVoice(){
+  let voices=[];
+  try{voices=window.speechSynthesis?.getVoices?.()||[];}catch(_){return null;}
+  const english=voices.filter(v=>/^en(?:[-_]|$)/i.test(v.lang||''));
+  if(!english.length)return null;
+  const favourites=['karen','serena','samantha','moira','ava','allison','zoe',
+    'kate','aria','jenny','susan','victoria','tessa'];
+  const quality=/(?:premium|enhanced|natural|neural|siri)/i;
+  const novelty=/(?:bad news|good news|trinoids|whisper|bubbles|organ|cellos|zarvox|boing|bells|jester|junior|princess|fred|ralph|albert|hysterical|robot)/i;
+  const score=v=>{
+    const name=v.name||'';
+    const rank=favourites.findIndex(candidate=>name.toLowerCase().includes(candidate));
+    const locale=(v.lang||'').replace('_','-').toLowerCase();
+    return (quality.test(name)?30:0)+(rank<0?0:24-rank)+
+      (locale==='en-my'?6:locale==='en-au'?5:locale==='en-gb'?4:2)+
+      (v.localService?2:0)+(v.default?1:0)-(novelty.test(name)?90:0);
+  };
+  return english.slice().sort((a,b)=>score(b)-score(a))[0];
+}
+function speechDistance(metres){
+  if(metres>=1000){
+    const km=Number((metres/1000).toFixed(metres<10000?1:0));
+    return `${km} ${km===1?'kilometre':'kilometres'}`;
+  }
+  const rounded=metres<100?Math.max(10,Math.round(metres/10)*10):Math.round(metres/50)*50;
+  return `${rounded} metres`;
+}
+function expandSpeechDistances(text){
+  return text.replace(/\b(\d+(?:[.,]\d+)?)\s*km\b/gi,(_,v)=>{
+    const n=Number(v.replace(',','.'));
+    return `${v} ${n===1?'kilometre':'kilometres'}`;
+  }).replace(/\b(\d+(?:[.,]\d+)?)\s*m\b/gi,(_,v)=>{
+    const n=Number(v.replace(',','.'));
+    return `${v} ${n===1?'metre':'metres'}`;
+  });
+}
+function spokenTurnInstruction(instruction,distance){
+  const action=expandSpeechDistances((instruction.message||guidanceLabel(instruction.maneuver))
+    .replace(/\s+/g,' ').trim()).replace(/[.!]$/,'');
+  if(!action)return '';
+  // Some TomTom messages already say “In 200 metres”; avoid saying it twice.
+  if(/^(?:in|after|within)\s+(?:about\s+)?\d+(?:[.,]\d+)?\s*(?:metres?|meters?|kilometres?|kilometers?)\b/i.test(action))
+    return `${action}.`;
+  const lead=distance<35?'Coming up,':`In ${speechDistance(distance)},`;
+  return `${lead} ${action[0].toLowerCase()}${action.slice(1)}.`;
+}
 function speakDirection(text){
   if(!navigation.voiced || !navigation.active || document.hidden || !('speechSynthesis' in window)) return;
   try {
-    window.speechSynthesis.cancel();
+    const synth=window.speechSynthesis;
     const utterance=new SpeechSynthesisUtterance(text);
-    utterance.lang='en-GB'; utterance.rate=.96; utterance.pitch=1;
-    window.speechSynthesis.speak(utterance);
-  }catch(_){/* Browser may disallow speech until a user gesture. */}
+    const voice=preferredNavigationVoice();
+    if(voice)utterance.voice=voice;
+    utterance.lang=voice?.lang||'en-GB';
+    utterance.rate=.88; // More time to follow road names and turns.
+    utterance.pitch=1.0; // Natural pitch avoids a synthetic, cartoonish tone.
+    utterance.volume=.92; // A gentler level; device volume stays user-controlled.
+    synth.cancel(); // A new upcoming turn replaces outdated speech.
+    synth.speak(utterance);
+  }catch(_){/* iOS can block speech or have no usable voice. */}
 }
 function updateNavAlert(text){
   navAlert.hidden=!text;
@@ -1881,12 +1935,15 @@ function refreshNavigationGuidance(progress){
   $('navTurnDistance').textContent=navDistance(distance);
   // Use the actual provider message, not an invented turn.
   $('navTurnText').textContent=next.message || guidanceLabel(next.maneuver);
-  for (const threshold of [500,150]){
+  // A large GPS update can cross both thresholds at once. Speak once,
+  // preferring the more urgent instruction rather than interrupting ourselves.
+  for (const threshold of [150,500]){
     const key=`${index}-${threshold}`;
-    if(distance<=threshold && distance>Math.max(0,threshold===150?8:130) && !navigation.spoken.has(key)){
+    if(distance<=threshold && distance>(threshold===150?8:130) && !navigation.spoken.has(key)){
       navigation.spoken.add(key);
-      const dist=navDistance(distance);
-      speakDirection(`${dist}. ${next.message || guidanceLabel(next.maneuver)}`);
+      if(threshold===150) navigation.spoken.add(`${index}-500`);
+      speakDirection(spokenTurnInstruction(next,distance));
+      break;
     }
   }
 }
@@ -2019,14 +2076,15 @@ function onNavigationLocation(position){
   }else navigation.arrivalCount=0;
   if(navigation.arrivalCount>=2 && !navigation.announcedArrival){
     navigation.announcedArrival=true;
-    speakDirection('You have arrived at your destination');
-    endNavigation('Arrived at destination');
+    const finishingWithVoice=navigation.voiced && !document.hidden;
+    speakDirection('You have arrived at your destination.');
+    endNavigation('Arrived at destination',{finishAnnouncement:finishingWithVoice});
     return;
   }
   navigation.lastUpdate=now;
 }
 
-function endNavigation(message='Navigation ended'){
+function endNavigation(message='Navigation ended',{finishAnnouncement=false}={}){
   stopNavigationWakeLock();
   if(!navigation.active)return;
   navigation.active=false;
@@ -2034,7 +2092,7 @@ function endNavigation(message='Navigation ended'){
   navigation.watchId=null;
   cancelAnimationFrame(navigation.markerAnimation);
   navigation.markerAnimation=0;
-  if('speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
+  if(!finishAnnouncement && 'speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
   navHud.hidden=true;navFooter.hidden=true;
   appRoot.classList.remove('navigation-active');
   navigation.follow=true;navigation.voiced=false;navigation.turnIndex=-1;
@@ -2196,7 +2254,7 @@ $('navSound').addEventListener('click',()=>{
   button.textContent=navigation.voiced?'Voice on':'Voice off';
   button.setAttribute('aria-pressed',String(navigation.voiced));
   if(navigation.voiced){
-    speakDirection('Voice guidance enabled');
+    speakDirection('Voice directions are on.');
   }else if('speechSynthesis' in window){
     try{window.speechSynthesis.cancel();}catch(_){}
   }

@@ -327,3 +327,14 @@ No changes were made to routing, GPS smoothing, search, traffic, or other map fe
 - Search destinations now use an original softer, rounded blue pin rendered as a high-resolution vector shape on a canvas. The pin remains a map-native MapLibre symbol anchored to its destination coordinate, including through rotation and 2D/3D changes.
 - The pin has a white centre and outline for light/dark map legibility. There are no new runtime dependencies.
 - No changes to TomTom traffic, search, navigation, direction cone, wake lock or route ranking logic.
+
+
+## Softer, clearer navigation voice (this update)
+
+- When **Voice on** is enabled, MyArah chooses a natural-sounding English voice from the voices the device/browser exposes. It prefers higher-quality English voices if available, with the default English voice as a fallback. Availability and accent vary by iOS version and installed system voices.
+- Slower (0.88), natural-pitch speech at a slightly gentler volume helps make junction instructions and Malaysian road names easier to hear. Your iPhone volume remains under your control.
+- Spoken instructions now use conversational distances such as **“In 200 metres, turn left”**, not “200 m. Turn left”. Provider messages that already include a distance aren't prefixed twice. The on-screen TomTom instruction is unchanged.
+- If GPS jumps over both announcement thresholds, the more urgent instruction is spoken once rather than immediately being interrupted by another prompt. The arrival announcement is now allowed to finish after the trip closes automatically.
+- The existing **Voice on/off** button stays. No new controls, UI sections, services, keys or audio downloads are needed. Spoken guidance still uses device Web Speech API and still requires MyArah in the foreground.
+- A web app **cannot force Apple Siri's voice** or guarantee that a particular high-quality voice exists. Speech output may still be interrupted by iOS policies.
+- Scope: `app.js` voice selection and announcement wording, `index.html` version refresh, and README. `styles.css` and all routing, GPS, markers, traffic and screen-awake behavior are unchanged.
