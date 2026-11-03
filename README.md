@@ -383,3 +383,23 @@ No changes were made to routing, GPS smoothing, search, traffic, or other map fe
 The embedded vector icon artwork is derived from Lucide Icons (https://lucide.dev), copyright (c) Lucide Icons and Contributors, under the ISC License.
 
 > Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies. THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING FROM, OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+
+## Automatic rerouting and "Proceed to the route" (November 2026)
+
+- MyArah **automatically recalculates** when repeated, accurate GPS fixes confirm you have driven away from the chosen route. It waits for actual movement rather than acting on one noisy fix.
+- A vehicle starting near a mapped road (e.g. inside a shopping mall parking lot) sees **Proceed to the route** instead of premature turns. Two solid on-road GPS readings resume normal guidance.
+- Auto reroute uses the latest **raw** GPS coordinates and the existing TomTom Routing API (traffic-aware, driving directions). It does not snap the request origin to the old route.
+- Requests are limited to one at a time with a **45-second automatic cooldown** to protect API usage and prevent repeated route changes. Manual Recalculate remains available as an error fallback.
+- Recalculating resets route progress, next-turn, road matching, and ETA state. A trip-end cancels pending requests so an old result cannot overwrite a later trip.
+- This remains a **foreground-only** web-app navigation prototype. GPS and provider routing can be inaccurate around multi-storey car parks, tunnels and parallel roads; only rely on safe, legal road maneuvers and normal driving judgment.
+- No new buttons or panels added. The existing circular navigation dock and portrait controls are preserved, as are light/dark styles, voice, screen-awake, search and traffic layers.
+
+### Test suggestions
+
+1. While parked a little away from the road, begin navigation: it should say **Proceed to the route** and should not repeatedly recalculate while stationary.
+2. Join the blue route: after a couple of accurate GPS fixes the normal turn instructions return.
+3. As a passenger on a familiar route, deliberately take a different *legal* turn: after several accurate moving fixes, MyArah should quietly recalculate.
+4. Switch away/return and end navigation while routing is in progress; no stale route should replace the trip.
+
+Your TomTom key is still entered on your device and is not bundled in the ZIP.

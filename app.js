@@ -1535,6 +1535,11 @@ const navigation = {
   // Keep timing state separate from GPS/map smoothing and reset it on reroute.
   guidanceSpeed:null, guidanceSpokenAt:0,
   offCount:0, offRoute:false, rerouting:false, lastReroute:0,
+  // Automatic rerouting only follows confirmed movement off the selected road.
+  offStartPoint:null, autoFailure:false, rerouteController:null, sessionToken:0,
+  // A car park / mall entrance may start slightly away from the routed road.
+  joiningRoute:false, joinSince:0, joinStartPoint:null,
+  joinStartDistance:0, joinOnCount:0,
   lastPosition:null, announcedArrival:false,
   // Indexed route geometry and filtered position are held only during guidance.
   routeIndex:null, matchedAlong:null, drawnAlong:null,
@@ -1694,6 +1699,34 @@ const NAV_FIX_MAX_AGE_MS = 15000;
 const NAV_FIX_MAX_ACCURACY_M = 85;
 const NAV_OFF_ROUTE_FIXES = 3;
 const NAV_OFF_ROUTE_CONFIRM_MS = 2500;
+const NAV_AUTO_REROUTE_CONFIRM_MS = 6000;
+const NAV_AUTO_REROUTE_COOLDOWN_MS = 45000;
+const NAV_AUTO_REROUTE_MIN_TRAVEL_M = 24;
+const NAV_JOIN_ALLOW_START_M = 450;
+// The decision is deliberately conservative: no reroute for a single bad fix,
+// a stationary vehicle, poor GPS, or a route that is still being joined.
+function shouldAutomaticallyReroute(state,point,accuracy,speed,now){
+  if(!state.active || state.rerouting || state.joiningRoute || !state.offRoute ||
+     !state.offStartPoint || state.offCount<NAV_OFF_ROUTE_FIXES ||
+     now-state.offSince<NAV_AUTO_REROUTE_CONFIRM_MS ||
+     (state.lastReroute>0 && now-state.lastReroute<NAV_AUTO_REROUTE_COOLDOWN_MS) ||
+     !Number.isFinite(accuracy) || accuracy>55 ||
+     !Number.isFinite(speed) || speed<2.5 ||
+     !point?.every?.(Number.isFinite))return false;
+  return haversineMeters(state.offStartPoint,point)>=NAV_AUTO_REROUTE_MIN_TRAVEL_M;
+}
+function needsToJoinRoute(match){
+  return !match?.valid || match.nearestDistance>32;
+}
+function resetJoinState(match,point,now=Date.now()){
+  navigation.joiningRoute=needsToJoinRoute(match);
+  navigation.joinSince=now;
+  navigation.joinStartPoint=[...point];
+  navigation.joinStartDistance=Number.isFinite(match?.nearestDistance) ? match.nearestDistance : Infinity;
+  navigation.joinOnCount=0;
+  navigation.offStartPoint=null;
+  navigation.autoFailure=false;
+}
 function routeGeometryIndex(coordinates){
   if(!Array.isArray(coordinates) || coordinates.length<2) return null;
   let total=0;
@@ -1919,6 +1952,15 @@ function updateNavAlert(text){
   navAlert.hidden=!text;
   navAlert.textContent=text||'';
 }
+// The existing maneuver card is reused for a car park or uncertain road entry.
+// Do not announce a turn while the GPS has not confidently joined the route.
+function showProceedToRoute(distance){
+  $('navTurnSymbol').textContent='↑';
+  $('navTurnDistance').textContent=Number.isFinite(distance) ?
+    `${navDistance(Math.max(0,distance))} from route` : 'Join the route';
+  $('navTurnText').textContent='Proceed to the route';
+  const next=$('navNextTurn');if(next)next.hidden=true;
+}
 // TomTom Orbis routeOffsetInMeters is the position of the *actual maneuver*,
 // not an early-warning marker. Only move to the next card after that position.
 // A small speed-related buffer prevents a GPS fix hovering around a junction
@@ -2090,6 +2132,11 @@ function refreshNavTrip(now=Date.now()){
     eta.estimatedArrival=null;
     return;
   }
+  if(navigation.joiningRoute){
+    $('navRemaining').textContent=navDistance(Math.max(0,route.meters-eta.progress))+' left';
+    $('navEta').textContent='ETA — · join route';
+    return;
+  }
   const remaining=Math.max(0,route.meters-eta.progress);
   $('navRemaining').textContent=navDistance(remaining)+' left';
   const baseSeconds=route.meters>0 ? Math.max(0,route.seconds)*remaining/route.meters : 0;
@@ -2167,32 +2214,75 @@ function onNavigationLocation(position){
   const recoveredThreshold=Math.max(22,Math.min(63,accuracy*1.3+14));
   const definitelyOff=match.nearestDistance>offThreshold;
   const clearlyOn=match.valid && match.nearestDistance<recoveredThreshold;
-  if(definitelyOff){
-    navigation.offCount++;
-    navigation.onCount=0;
-    if(!navigation.offSince)navigation.offSince=now;
-    if(navigation.offCount>=NAV_OFF_ROUTE_FIXES &&
-        now-navigation.offSince>=NAV_OFF_ROUTE_CONFIRM_MS) navigation.offRoute=true;
-  }else if(clearlyOn){
-    navigation.onCount++;
-    // A credible on-road fix breaks a run of suspicious off-route readings.
-    navigation.offCount=0;
-    navigation.offSince=0;
-    // Require two credible readings before clearing a confirmed deviation.
-    if(navigation.onCount>=2)navigation.offRoute=false;
-  }else{
-    navigation.onCount=0;
-    // A marginal reading should not undo a confirmed deviation.
+  if(navigation.joiningRoute){
+    // Do not reroute just because the GPS begins in a mall car park. Wait for
+    // two good on-road fixes; GPS may briefly drift across the mapped road.
+    navigation.joinOnCount=clearlyOn && accuracy<=55 ? navigation.joinOnCount+1 : 0;
+    if(navigation.joinOnCount>=2){
+      navigation.joiningRoute=false;
+      navigation.offRoute=false;
+      navigation.offCount=0;
+      navigation.offSince=0;
+      navigation.onCount=2;
+      navigation.offStartPoint=null;
+      navigation.autoFailure=false;
+    }else{
+      // If the driver actually travels away from the planned route, leave the
+      // parking-lot grace period and let the confirmed off-route logic apply.
+      const driven=haversineMeters(navigation.joinStartPoint||point,point);
+      if(now-navigation.joinSince>=20000 && driven>=120 &&
+         match.nearestDistance>Math.max(160,navigation.joinStartDistance+40) &&
+         Number.isFinite(speed) && speed>=3.2 && accuracy<=40){
+        navigation.joiningRoute=false;
+        navigation.offRoute=true;
+        navigation.offCount=NAV_OFF_ROUTE_FIXES;
+        navigation.offSince=now-NAV_AUTO_REROUTE_CONFIRM_MS;
+        navigation.offStartPoint=[...(navigation.joinStartPoint||point)];
+      }
+    }
+  }
+  if(!navigation.joiningRoute){
+    if(definitelyOff){
+      if(!navigation.offCount || !navigation.offStartPoint){
+        navigation.offSince=now;
+        navigation.offStartPoint=[...point];
+      }
+      navigation.offCount++;
+      navigation.onCount=0;
+      if(navigation.offCount>=NAV_OFF_ROUTE_FIXES &&
+          now-navigation.offSince>=NAV_OFF_ROUTE_CONFIRM_MS) navigation.offRoute=true;
+    }else if(clearlyOn){
+      navigation.onCount++;
+      navigation.offCount=0;
+      navigation.offSince=0;
+      navigation.offStartPoint=null;
+      if(navigation.onCount>=2){navigation.offRoute=false;navigation.autoFailure=false;}
+    }else{
+      navigation.onCount=0;
+      // A marginal GPS fix must not clear a confirmed deviation.
+    }
   }
   $('navReroute').hidden=!navigation.offRoute;
   let display=point;
   let matchedDisplayAlong=null;
   let bearing=navigation.lastBearing;
-  if(navigation.offRoute){
-    // Remove the old along-route anchor: a genuinely deviated driver may
-    // rejoin farther along (or earlier), not beside the last trusted sample.
+  if(navigation.rerouting){
+    showProceedToRoute(match.nearestDistance);
+    $('navTurnDistance').textContent='Updating route…';
+    $('navTurnText').textContent='Finding a new route';
+    updateNavAlert('Recalculating automatically from your location…');
+  }else if(navigation.joiningRoute){
+    // Keep the raw GPS dot honest: no artificial snapping in a car park.
+    showProceedToRoute(match.nearestDistance);
+    updateNavAlert('');
+  }else if(navigation.offRoute){
+    // Genuine deviation: remove the old along-route anchor so the GPS dot
+    // will not jump back to a road that the driver has already left.
     navigation.matchedAlong=null;
-    updateNavAlert('You may be off route. Recalculate using live GPS.');
+    showProceedToRoute(match.nearestDistance);
+    updateNavAlert(navigation.autoFailure ?
+      'Could not update the route. Tap Recalculate to try again.' :
+      'Checking your location for a safe route update…');
   }else if(match.valid && !definitelyOff){
     // Filter *distance along the route*, not raw lat/lon. This prevents a
     // smoothed marker from cutting across corners or drifting off the road.
@@ -2226,9 +2316,14 @@ function onNavigationLocation(position){
     bearing=stableRouteBearing(heading,speed);
     updateNavAlert('');
   }else{
-    // Important: uncertain readings are displayed at their measured point,
-    // not forced onto the route (e.g. a genuine wrong exit or parallel road).
-    updateNavAlert('Checking your position near the route…');
+    // Uncertain readings stay at the measured point (e.g. a parking area).
+    showProceedToRoute(match.nearestDistance);
+    updateNavAlert('');
+  }
+  // Confirm a missed turn with multiple accurate GPS fixes and actual motion.
+  // Never start two routing requests from successive watchPosition callbacks.
+  if(!document.hidden && shouldAutomaticallyReroute(navigation,point,accuracy,speed,now)){
+    void recalculateNavigation({automatic:true});
   }
   // Also refresh for uncertain and off-route readings; an old route's ETA
   // should never be presented as reliable after a confirmed deviation.
@@ -2238,7 +2333,7 @@ function onNavigationLocation(position){
   followNavigationCamera(display,bearing);
   // Require two close, precise readings before announcing arrival.
   const toDestination=haversineMeters(point,chosen.coords);
-  if(!navigation.offRoute && clearlyOn && accuracy<=35 && toDestination<25 &&
+  if(!navigation.offRoute && !navigation.joiningRoute && clearlyOn && accuracy<=35 && toDestination<25 &&
       navigation.lastProgress>=navigation.route.meters-85){
     navigation.arrivalCount++;
   }else navigation.arrivalCount=0;
@@ -2256,6 +2351,12 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   stopNavigationWakeLock();
   if(!navigation.active)return;
   navigation.active=false;
+  navigation.sessionToken+=1; // invalidate any in-flight route response
+  if(navigation.rerouteController){
+    navigation.rerouteController.abort();
+    navigation.rerouteController=null;
+  }
+  navigation.rerouting=false;
   if(navigation.watchId!==null) navigator.geolocation.clearWatch(navigation.watchId);
   navigation.watchId=null;
   if(navigation.etaTimer!==null)clearInterval(navigation.etaTimer);
@@ -2270,11 +2371,19 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   navigation.spoken.clear();navigation.guidanceSpeed=null;
   navigation.guidanceSpokenAt=0;
   navigation.offCount=0;navigation.offRoute=false;
+  navigation.offStartPoint=null;navigation.autoFailure=false;
+  navigation.joiningRoute=false;navigation.joinOnCount=0;
+  navigation.joinStartPoint=null;navigation.joinSince=0;
   navigation.routeIndex=null;navigation.matchedAlong=null;navigation.drawnAlong=null;
   navigation.lastRawFix=null;navigation.lastCameraPoint=null;
   navigation.lastCameraBearing=null;navigation.offSince=0;navigation.onCount=0;
   navigation.arrivalCount=0;
-  $('navReroute').hidden=true;updateNavAlert('');
+  const rerouteButton=$('navReroute');
+  rerouteButton.hidden=true;
+  rerouteButton.disabled=false;
+  rerouteButton.classList.remove('nav-action-working');
+  setNavActionLabel('navReroute','Recalculate','Recalculate driving route');
+  updateNavAlert('');
   const nextTurnRow=$('navNextTurn'); if(nextTurnRow) nextTurnRow.hidden=true;
   setNavSoundState(false);
   setNavFollowState(true);
@@ -2305,9 +2414,9 @@ function startNavigation(){
     if(chosen?.id!==destinationId){stopNavigationWakeLock();refreshNavigationStart();return;}
     const point=[position.coords.longitude,position.coords.latitude];
     const snap=computePolylineProgress(route.coordinates,point);
-    if(!snap || snap.distance>170 || position.coords.accuracy>100){
+    if(!snap || snap.distance>NAV_JOIN_ALLOW_START_M || position.coords.accuracy>100){
       stopNavigationWakeLock();
-      setRouteStatus('Your current GPS position is far from this route or inaccurate. Refresh routes from your GPS, then tap Start.',true);
+      setRouteStatus('Your location is too far from this route or GPS is inaccurate. Refresh routes from live GPS, then tap Start.',true);
       refreshNavigationStart();return;
     }
     const index=routeGeometryIndex(route.coordinates);
@@ -2336,6 +2445,10 @@ function startNavigation(){
       lastAcceptedTime:Date.now(),lastCameraPoint:null,lastCameraBearing:null,
       offSince:0,onCount:0,arrivalCount:0
     });
+    navigation.sessionToken+=1;
+    navigation.lastReroute=0;
+    navigation.rerouting=false;
+    resetJoinState(initial,point);
     // Search-keyboard scroll recovery can leave iOS visually shifted.
     // Restore the map viewport before showing the fixed-position navigation HUD.
     window.scrollTo(0,0);
@@ -2348,7 +2461,8 @@ function startNavigation(){
     setNavFollowState(true);
     showUserLocation(displayed);
     initializeNavEta(route,navigation.lastProgress);
-    refreshNavigationGuidance(navigation.lastProgress);
+    if(navigation.joiningRoute)showProceedToRoute(initial?.nearestDistance??snap.distance);
+    else refreshNavigationGuidance(navigation.lastProgress);
     refreshNavTrip();
     // Even if the car is stationary and GPS reports no new coordinates,
     // update the displayed ETA as time passes. No additional map animation.
@@ -2372,18 +2486,39 @@ function startNavigation(){
   },{enableHighAccuracy:true,maximumAge:2000,timeout:14000});
 }
 
-async function recalculateNavigation(){
-  if(!navigation.active||navigation.rerouting||!trafficKey||!chosen||!navigation.lastCoords)return;
-  const since=Date.now()-navigation.lastReroute;
-  if(since<30000){updateNavAlert('Please wait before recalculating again.');return;}
-  navigation.rerouting=true;navigation.lastReroute=Date.now();
-  const button=$('navReroute');button.disabled=true;button.classList.add('nav-action-working');setNavActionLabel('navReroute','Updating…','Updating route');
-  const destinationId=navigation.destinationId,origin=[...navigation.lastCoords];
-  updateNavAlert('Finding a new route from your GPS…');
-  const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),20000);
+async function recalculateNavigation({automatic=false}={}){
+  if(!navigation.active || navigation.rerouting || !trafficKey || !chosen ||
+     !navigation.lastCoords || document.hidden)return false;
+  const now=Date.now();
+  const cooldown=automatic ? NAV_AUTO_REROUTE_COOLDOWN_MS : 5000;
+  if(navigation.lastReroute>0 && now-navigation.lastReroute<cooldown){
+    if(!automatic)updateNavAlert('Please wait a moment before recalculating again.');
+    return false;
+  }
+  // A stale location is not a safe origin for an automatic route. The GPS
+  // listener will retry when it has a new accurate fix (subject to cooldown).
+  if(automatic && (!navigation.lastRawFix || now-navigation.lastAcceptedTime>12000 ||
+      navigation.lastRawFix.accuracy>55))return false;
+  navigation.rerouting=true;
+  navigation.lastReroute=now;
+  navigation.autoFailure=false;
+  const token=navigation.sessionToken;
+  const button=$('navReroute');
+  button.disabled=true;button.classList.add('nav-action-working');
+  setNavActionLabel('navReroute','Updating…','Updating route');
+  const destinationId=navigation.destinationId;
+  const origin=[...navigation.lastCoords]; // raw GPS, never snapped to old road
+  const destination=[...chosen.coords];
+  updateNavAlert(automatic?'Recalculating automatically…':'Finding a new route from your GPS…');
+  $('navTurnDistance').textContent='Updating route…';
+  $('navTurnText').textContent='Finding a new route';
+  const nextTurn=$('navNextTurn');if(nextTurn)nextTurn.hidden=true;
+  const controller=new AbortController();
+  navigation.rerouteController=controller;
+  const timeout=setTimeout(()=>controller.abort(),20000);
   try{
     const body={
-      routePlanningLocations:{origin:{type:'Point',coordinates:origin},destination:{type:'Point',coordinates:chosen.coords}},
+      routePlanningLocations:{origin:{type:'Point',coordinates:origin},destination:{type:'Point',coordinates:destination}},
       routeType:'fast',travelMode:'car',traffic:'live',departureDateTime:'now',maxPathAlternativeRoutes:0,
       guidance:'instructions',instructionPhonetics:'ipa'
     };
@@ -2394,32 +2529,62 @@ async function recalculateNavigation(){
     });
     if(!response.ok)throw new Error(describeRouteError(response));
     const routes=normalizeProviderRoutes(await response.json());
-    if(!navigation.active||navigation.destinationId!==destinationId)return;
+    // Never let an old route request replace the route for a later trip.
+    if(!navigation.active || navigation.sessionToken!==token ||
+       navigation.destinationId!==destinationId || chosen?.id!==destinationId)return false;
     const route=routes[0];
     if(!route?.instructions?.some(i=>i.maneuver!=='depart'))throw new Error('New route has no usable turn instructions.');
-    routeOptions=[route];routeSelected=0;routeOrigin={coords:origin,kind:'gps',label:'Current location'};
-    navigation.route=route;navigation.routeIndex=routeGeometryIndex(route.coordinates);
+    const index=routeGeometryIndex(route.coordinates);
+    if(!index)throw new Error('Updated route geometry unavailable.');
+    const newMatch=matchGpsToRoute(index,origin,{
+      accuracy:navigation.lastRawFix?.accuracy??30,
+      speed:navigation.lastRawFix?.speed,
+      heading:navigation.lastPosition?.coords?.heading
+    });
+    routeOptions=[route];routeSelected=0;
+    routeOrigin={coords:origin,kind:'gps',label:'Current location'};
+    navigation.route=route;navigation.routeIndex=index;
     navigation.lastProgress=0;navigation.turnIndex=-1;
     navigation.spoken.clear();navigation.guidanceSpeed=null;
     navigation.guidanceSpokenAt=0;
     navigation.offCount=0;navigation.offRoute=false;
     navigation.matchedAlong=null;navigation.drawnAlong=null;
     navigation.offSince=0;navigation.onCount=0;navigation.arrivalCount=0;
-    // A new route restarts matching at the latest real GPS point, not the
-    // obsolete last matched point on the previous route.
     navigation.lastRawFix=null;
+    resetJoinState(newMatch,origin);
     initializeNavEta(route,0);
     refreshNavTrip();
     syncRouteLayers();renderRouteCards();
     const pos=navigation.lastPosition;
     if(pos)onNavigationLocation(pos);
-    updateNavAlert('Route updated using live traffic where available');
-    setTimeout(()=>{if(navigation.active&&!navigation.offRoute)updateNavAlert('');},3500);
+    if(navigation.joiningRoute){
+      showProceedToRoute(newMatch?.nearestDistance);
+      updateNavAlert('');
+    }else{
+      refreshNavigationGuidance(navigation.lastProgress);
+      updateNavAlert('Route updated');
+      setTimeout(()=>{
+        if(navigation.active && navigation.sessionToken===token && !navigation.offRoute && !navigation.joiningRoute)updateNavAlert('');
+      },2800);
+    }
+    return true;
   }catch(err){
-    if(navigation.active)updateNavAlert(err.name==='AbortError'?'Recalculation timed out. Try again.':err.message||'Recalculation failed.');
+    if(navigation.active && navigation.sessionToken===token){
+      navigation.autoFailure=true;
+      updateNavAlert(err.name==='AbortError'?
+        'Route update timed out. Tap Recalculate to retry.' :
+        automatic?'Automatic route update failed. Tap Recalculate to retry.' :
+        err.message||'Recalculation failed.');
+    }
+    return false;
   }finally{
-    clearTimeout(timeout);navigation.rerouting=false;
-    button.disabled=false;button.classList.remove('nav-action-working');setNavActionLabel('navReroute','Recalculate','Recalculate driving route');
+    clearTimeout(timeout);
+    if(navigation.rerouteController===controller){
+      navigation.rerouteController=null;
+      navigation.rerouting=false;
+      button.disabled=false;button.classList.remove('nav-action-working');
+      setNavActionLabel('navReroute','Recalculate','Recalculate driving route');
+    }
   }
 }
 
@@ -2460,9 +2625,13 @@ $('navSound').addEventListener('click',()=>{
   const button=$('navSound');
   setNavSoundState(navigation.voiced);
   if(navigation.voiced){
-    const before=navigation.guidanceSpokenAt;
-    refreshNavigationGuidance(navigation.lastProgress,navigation.guidanceSpeed);
-    if(navigation.guidanceSpokenAt===before)speakDirection('Voice directions are on.',{interrupt:false});
+    if(navigation.joiningRoute || navigation.offRoute){
+      speakDirection('Proceed to the route.',{interrupt:false});
+    }else{
+      const before=navigation.guidanceSpokenAt;
+      refreshNavigationGuidance(navigation.lastProgress,navigation.guidanceSpeed);
+      if(navigation.guidanceSpokenAt===before)speakDirection('Voice directions are on.',{interrupt:false});
+    }
   }else if('speechSynthesis' in window){
     try{window.speechSynthesis.cancel();}catch(_){}
   }
