@@ -1578,12 +1578,73 @@ const navigation = {
   lastCameraBearing:null, offSince:0, onCount:0, arrivalCount:0,
   // Independent ETA state: only reliable on-route fixes update trip progress.
   eta:null, etaTimer:null,
+  speedometer:null, speedTimer:null,
   lastAlert:''
 };
 const navStartButton=$('navStart');
 const navHud=$('navHud');
 const navFooter=$('navFooter');
 const navAlert=$('navAlert');
+
+// GPS-based speedometer. The browser reports metres/second (sometimes null).
+// Inference is deliberately stricter than the speed used by navigation guidance:
+// a parked car must not appear to accelerate due to ordinary GPS drift.
+const NAV_SPEED_FRESH_MS = 10000;
+function reliableNavSpeed(reported, inferred, accuracy, previousAccuracy, displacement, elapsed) {
+  if (!Number.isFinite(accuracy) || accuracy > 45) return null;
+  if (Number.isFinite(reported) && reported >= 0 && reported <= 75) return reported;
+  if (Number.isFinite(inferred) && inferred >= 0 && inferred <= 55 &&
+      Number.isFinite(previousAccuracy) && accuracy <= 20 && previousAccuracy <= 20 &&
+      elapsed >= 1.5 && elapsed <= 9 &&
+      displacement >= Math.max(15, (accuracy + previousAccuracy) * 1.65)) return inferred;
+  return null;
+}
+function renderNavSpeed(now=Date.now()) {
+  const gauge=$('navSpeed');
+  if (!gauge) return;
+  const state=navigation.speedometer;
+  if (!navigation.active || !state) { gauge.hidden=true; return; }
+  gauge.hidden=false;
+  const fresh=state.filtered!==null && now-state.trustedAt <= NAV_SPEED_FRESH_MS;
+  const kmh=fresh ? Math.max(0, Math.round(state.filtered*3.6)) : null;
+  const value=kmh!==null && kmh<3 ? 0 : kmh;
+  if (state.displayed!==value) {
+    $('navSpeedValue').textContent=value===null ? '—' : String(value);
+    state.displayed=value;
+  }
+  gauge.dataset.available=fresh?'true':'false';
+  gauge.setAttribute('aria-label',fresh ? `Approximate GPS speed ${value} kilometres per hour` : 'GPS speed unavailable');
+}
+function resetNavSpeed(initialSpeed=null, accuracy=Infinity, now=Date.now()) {
+  navigation.speedometer={filtered:null,trustedAt:0,lastSampleAt:0,displayed:undefined};
+  if (Number.isFinite(initialSpeed) && initialSpeed>=0 && initialSpeed<=75 && accuracy<=45) {
+    navigation.speedometer.filtered=initialSpeed;
+    navigation.speedometer.trustedAt=now;
+    navigation.speedometer.lastSampleAt=now;
+  }
+  renderNavSpeed(now);
+}
+function updateNavSpeed(reported, inferred, accuracy, previousAccuracy, displacement, elapsed, now=Date.now()) {
+  const state=navigation.speedometer;
+  if (!navigation.active || !state) return;
+  const sample=reliableNavSpeed(reported,inferred,accuracy,previousAccuracy,displacement,elapsed);
+  if (sample!==null) {
+    const sampleDt=state.lastSampleAt ? Math.max(.1,Math.min(12,(now-state.lastSampleAt)/1000)) : 2;
+    if(state.filtered===null || now-state.trustedAt>NAV_SPEED_FRESH_MS) {
+      state.filtered=sample;
+    }else {
+      // Ease readings, but do not delay genuine slowing or stopping too much.
+      const response=sample<state.filtered ? 1.45 : 2.3;
+      const weight=1-Math.exp(-sampleDt/response);
+      const bounded=state.filtered + Math.max(-7*sampleDt,Math.min(5*sampleDt,sample-state.filtered));
+      state.filtered=state.filtered+(bounded-state.filtered)*weight;
+      if (sample<.5 && state.filtered<.95) state.filtered=0;
+    }
+    state.lastSampleAt=now;
+    state.trustedAt=now;
+  }
+  renderNavSpeed(now);
+}
 
 // Keep the screen awake automatically during foreground navigation.
 // This is a best-effort browser request: iOS can revoke or reject it.
@@ -2510,6 +2571,8 @@ function onNavigationLocation(position){
   navigation.lastRawFix={point:[...point],accuracy,speed,stamp};
   navigation.lastPosition=position;
   navigation.lastAcceptedTime=now;
+  updateNavSpeed(reportedSpeed,inferredSpeed,accuracy,previous?.accuracy,
+    displacement,dt,now);
   // Keep RAW location as the origin for recalculation. Do not reroute from a
   // point artificially snapped onto the old road.
   navigation.lastCoords=point;
@@ -2673,6 +2736,10 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   if(navigation.etaTimer!==null)clearInterval(navigation.etaTimer);
   navigation.etaTimer=null;
   navigation.eta=null;
+  if(navigation.speedTimer!==null)clearInterval(navigation.speedTimer);
+  navigation.speedTimer=null;
+  navigation.speedometer=null;
+  $('navSpeed').hidden=true;
   cancelAnimationFrame(navigation.markerAnimation);
   navigation.markerAnimation=0;
   stopNavigationCamera();
@@ -2772,6 +2839,11 @@ function startNavigation(){
     appRoot.classList.add('navigation-active');
     updateNavigationArrowCourse(matched?.bearing ?? (Number.isFinite(position.coords.heading) && position.coords.speed>1.5 ? position.coords.heading : snap.bearing));
     navHud.hidden=false;navFooter.hidden=false;
+    resetNavSpeed(position.coords.speed,Number(position.coords.accuracy));
+    if (navigation.speedTimer!==null) clearInterval(navigation.speedTimer);
+    navigation.speedTimer=setInterval(()=>{
+      if(navigation.active && !document.hidden) renderNavSpeed();
+    },2000);
     setNavFollowState(true);
     showUserLocation(displayed);
     initializeNavEta(route,navigation.lastProgress);
@@ -2965,6 +3037,7 @@ document.addEventListener('visibilitychange',()=>{
     if (navigationWakeDesired) void requestNavigationWakeLock();
     updateNavAlert('Check your position and route after returning to MyArah.');
     refreshNavTrip();
+    renderNavSpeed();
     map.resize();
     if(navigation.markerPoint)followNavigationCamera(navigation.markerPoint,navigation.lastBearing,true);
   }

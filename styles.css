@@ -1784,3 +1784,142 @@ body.dark #navNextTurn .nav-next-label{background:rgba(114,185,241,.19);color:#d
   #navTurnText{font-size:17px;}
   #navTurnRoad{font-size:12px;}
 }
+
+
+
+/* ========================================================================
+   MyArah glass refinement (iPhone PWA-friendly, no added map/WebGL rendering)
+   Real Apple's native Liquid Glass refracts the live backing scene; WebKit
+   doesn't provide general backdrop-pixel displacement to ordinary webpage
+   elements. This is a fast, layered optical approximation, not native glass.
+   ======================================================================== */
+:root {
+  --myarah-lens-bg:
+    radial-gradient(ellipse 86% 66% at 26% 7%,rgba(255,255,255,.72),rgba(255,255,255,0) 86%),
+    linear-gradient(148deg,rgba(253,254,255,.82) 0%,rgba(230,242,252,.73) 48%,rgba(185,212,237,.65) 100%);
+  --myarah-lens-rim:rgba(255,255,255,.92);
+  --myarah-lens-shadow:0 7px 19px rgba(18,43,66,.23),
+    inset 0 1.6px 1.4px rgba(255,255,255,.94),
+    inset 1px 0 1px rgba(255,255,255,.49),
+    inset -1.4px -2px 2px rgba(56,92,122,.18);
+}
+body.dark {
+  --myarah-lens-bg:
+    radial-gradient(ellipse 88% 74% at 27% 8%,rgba(172,211,249,.31),rgba(167,206,245,0) 87%),
+    linear-gradient(148deg,rgba(66,93,122,.85) 0%,rgba(37,61,87,.82) 55%,rgba(19,38,59,.90) 100%);
+  --myarah-lens-rim:rgba(178,207,233,.58);
+  --myarah-lens-shadow:0 8px 20px rgba(0,8,18,.48),
+    inset 0 1.5px 1px rgba(243,251,255,.29),
+    inset 1px 0 1px rgba(214,232,246,.14),
+    inset -1px -2px 2px rgba(6,13,24,.32);
+}
+
+/* Keep the traffic button's distinct design unchanged. */
+.map-controls .primary-control,
+.map-controls .text-control,
+#north.compass-control,
+#navFooter .nav-footer-buttons button,
+#navSpeed.nav-speed-gauge {
+  background:var(--myarah-lens-bg);
+  border-color:var(--myarah-lens-rim);
+  box-shadow:var(--myarah-lens-shadow);
+  -webkit-backdrop-filter:blur(11px) saturate(1.65) contrast(1.045);
+  backdrop-filter:blur(11px) saturate(1.65) contrast(1.045);
+}
+#navFooter .nav-footer-buttons button,
+#navSpeed.nav-speed-gauge {position:relative;isolation:isolate;overflow:hidden;}
+/* An asymmetric curved glint suggests a thick, rounded glass edge. */
+#navFooter .nav-footer-buttons button::before,
+#navSpeed.nav-speed-gauge::before {
+  content:'';position:absolute;inset:2px;border-radius:inherit;pointer-events:none;
+  background:radial-gradient(ellipse 95% 48% at 37% 2%,rgba(255,255,255,.51),transparent 82%);
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.30);
+}
+#navFooter .nav-footer-buttons button .nav-action-icon,
+#navSpeed .nav-speed-number,
+#navSpeed .nav-speed-unit {position:relative;z-index:1;}
+/* State colors remain obvious and the End control remains red. */
+#navFooter #navEnd.nav-end,
+body.dark #navFooter #navEnd.nav-end {
+  background:radial-gradient(ellipse 90% 65% at 28% 0%,rgba(255,255,255,.25),transparent 85%),
+    linear-gradient(150deg,#b94d57,#8f313c);
+  color:#fff;border-color:rgba(255,213,220,.70);
+  box-shadow:0 7px 18px rgba(103,24,35,.30),inset 0 1.3px 1px rgba(255,255,255,.34),inset -1px -1px 2px rgba(60,5,14,.22);
+}
+body.dark #navFooter #navEnd.nav-end{
+  background:radial-gradient(ellipse 90% 65% at 28% 0%,rgba(255,255,255,.19),transparent 85%),
+    linear-gradient(150deg,#aa4854,#722d38);
+}
+#navFooter #navSound[aria-pressed='true'],
+#navFooter #navFollow[data-following='true'],
+#navFooter #navReroute:not([hidden]){
+  background:radial-gradient(ellipse 86% 72% at 25% 7%,rgba(255,255,255,.66),transparent 85%),
+    linear-gradient(145deg,rgba(231,249,255,.90),rgba(168,215,248,.80));
+  color:#0c568d;border-color:rgba(92,159,211,.84);
+}
+body.dark #navFooter #navSound[aria-pressed='true'],
+body.dark #navFooter #navFollow[data-following='true'],
+body.dark #navFooter #navReroute:not([hidden]){
+  background:radial-gradient(ellipse 85% 65% at 27% 8%,rgba(171,222,251,.35),transparent 82%),
+    linear-gradient(150deg,#235d85,#153b59);
+  color:#def3ff;border-color:rgba(132,201,246,.80);
+}
+/* The trip and instruction panels become gently refractive-looking surfaces
+   without sacrificing the dark text contrast needed while driving. */
+#navFooter .nav-trip-details,
+.nav-hud-turn {
+  background:radial-gradient(ellipse 85% 70% at 18% 0%,rgba(255,255,255,.61),transparent 76%),
+    linear-gradient(145deg,rgba(255,255,255,.91),rgba(231,241,251,.84));
+  border-color:rgba(255,255,255,.90);
+  box-shadow:0 8px 23px rgba(17,42,68,.20),inset 0 1.6px 1px rgba(255,255,255,.92),inset 0 -1.5px 2px rgba(99,140,175,.14);
+  -webkit-backdrop-filter:blur(12px) saturate(1.45);
+  backdrop-filter:blur(12px) saturate(1.45);
+}
+body.dark #navFooter .nav-trip-details,
+body.dark .nav-hud-turn {
+  background:radial-gradient(ellipse 85% 65% at 22% 0%,rgba(160,195,232,.19),transparent 82%),
+    linear-gradient(145deg,rgba(48,68,92,.92),rgba(23,41,62,.90));
+  border-color:rgba(172,203,231,.44);
+  box-shadow:0 8px 28px rgba(0,0,0,.40),inset 0 1px 1px rgba(255,255,255,.21);
+}
+
+/* Read-only speedometer, only present during active navigation. */
+#navSpeed[hidden] {display:none!important;}
+#navSpeed.nav-speed-gauge {
+  position:absolute;z-index:9;pointer-events:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;
+  left:max(16px,env(safe-area-inset-left));right:auto;
+  bottom:calc(env(safe-area-inset-bottom) + 162px);
+  width:76px;height:76px;border:1.6px solid var(--myarah-lens-rim);border-radius:50%;
+  color:#203c56;font-variant-numeric:tabular-nums;
+  transition:opacity .25s ease;
+}
+#navSpeed .nav-speed-number{font-size:28px;font-weight:850;letter-spacing:-.065em;line-height:1.06;}
+#navSpeed .nav-speed-unit{font-size:10px;font-weight:780;letter-spacing:.015em;line-height:1.1;color:#46647f;}
+#navSpeed[data-available='false'] .nav-speed-number {color:#647d94;}
+body.dark #navSpeed.nav-speed-gauge{color:#f1f8ff;}
+body.dark #navSpeed .nav-speed-unit{color:#c2d7ea;}
+body.dark #navSpeed[data-available='false'] .nav-speed-number{color:#9fb4c9;}
+@media (orientation:landscape) and (max-height:560px){
+  #navSpeed.nav-speed-gauge{
+    left:max(13px,env(safe-area-inset-left));right:auto;
+    bottom:calc(env(safe-area-inset-bottom) + 83px);
+    width:67px;height:67px;
+  }
+  #navSpeed .nav-speed-number{font-size:24px;}
+  #navSpeed .nav-speed-unit{font-size:9px;}
+}
+@media (orientation:landscape) and (max-height:560px) and (max-width:780px){
+  #navSpeed.nav-speed-gauge{bottom:calc(env(safe-area-inset-bottom) + 150px);}
+}
+@media (orientation:portrait) and (max-width:365px){
+  #navSpeed.nav-speed-gauge{bottom:calc(env(safe-area-inset-bottom) + 152px);width:69px;height:69px;}
+  #navSpeed .nav-speed-number{font-size:25px;}
+}
+@media (prefers-contrast:more){
+  #navSpeed.nav-speed-gauge{background:rgba(246,250,255,.97);border-color:#678aa7;}
+  body.dark #navSpeed.nav-speed-gauge{background:rgba(22,41,63,.97);border-color:#b2d4ee;}
+}
+@media (prefers-reduced-motion:reduce){
+  #navSpeed.nav-speed-gauge{transition:none;}
+}

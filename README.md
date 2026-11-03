@@ -470,3 +470,14 @@ The SVGs are embedded in `index.html`/`app.js` and require no external download 
 - The car-park “Proceed to the route” and recalculation states clear old road details so stale directions cannot linger.
 - All navigation and search functionality, SVG icons, GPS smoothing, automatic rerouting, traffic, wake-lock, and light/dark layouts remain in place.
 - No extra buttons or API requests. Actual driving/on-device validation is still required.
+
+
+## GPS speed and refined glass (November 2026)
+
+- During an active navigation trip only, a small read-only **km/h** circle displays an approximate vehicle speed from the phone GPS. This is **not** the vehicle's speedometer or a road speed limit.
+- Uses geolocation `coords.speed` (metres/second), falling back to cautiously estimated movement between accurate GPS points only when the reported speed is unavailable. Speed is smoothed to reduce jitter; the dial shows **—** if readings are missing or stale rather than guessing.
+- It reuses the existing navigation GPS watcher, without more GPS polling, new API requests, buttons, or permissions. Starts and stops with navigation.
+- Refines glass on map GPS, 2D/3D, compass, navigation action buttons, trip summary and maneuver panel using asymmetric reflections, stronger rims, color-tinted saturation and lighter blur; the traffic button is intentionally unchanged.
+- Both light and dark modes retain high-contrast icons and labels, including visible pressed/active state. Reduced Motion and Increase Contrast are respected where supported.
+- **Limit:** native Apple Liquid Glass uses live optical refraction not available as a generic CSS effect over an animated MapLibre canvas on iOS Safari. This uses a lightweight visual approximation rather than a WebGL effect that could harm navigation performance.
+- Files to replace in GitHub: `index.html`, `styles.css`, `app.js` and (optionally) `README.md`. The versioned URLs in `index.html` help clear iPhone caches.
