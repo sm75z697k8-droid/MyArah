@@ -309,13 +309,13 @@ This update adds **real provider maneuver instructions**, a continuous GPS watch
 
 **Scope:** This is *on-device matching to the already selected route*, not a full traffic-aware road-network map-matching service. Nearby parallel streets may still be indistinguishable from consumer GPS alone. Traffic ETA updates, automatic rerouting and lock-screen navigation are still out of scope. Test while parked or as a passenger; don't rely on this prototype for safety-critical driving.
 
+## Automatic screen wake during navigation
 
-## Keep iPhone screen awake during navigation
+When you tap **Start navigation**, MyArah automatically requests a `screen` Wake Lock. No additional wake button, status label, or in-app warning appears. The navigation footer only shows its normal ETA and trip controls.
 
-MyArah now requests a **Screen Wake Lock** when you tap **Start navigation**. If supported and granted, the status button in the trip footer reads **Screen on**. You can tap it to turn that feature off, or tap again to retry when the request is unavailable. A failed/revoked request shows **Screen may lock** rather than a false success message.
+- The request begins during the existing **Start navigation** tap, even while the app checks the first GPS fix.
+- The wake lock is released automatically when navigation ends, the initial GPS check fails, or the app leaves the foreground. It tries to reacquire a lock when an active navigation session returns to the foreground.
+- **Limitations:** iOS/WebKit may reject or revoke the request, so screen-awake behavior is best-effort, not guaranteed. A web app cannot override physical locking, Low Power Mode policies or unsupported browser versions. Wake Lock requests normally do not display a permission prompt, but MyArah cannot suppress any iOS system-owned prompt if one appears.
+- If the screen still locks, consider temporarily increasing iPhone **Settings → Display & Brightness → Auto-Lock** (if available), then restore your preferred setting afterward.
 
-- Wake Lock is requested only for active navigation, not general map browsing. It is released when navigation ends or if the initial GPS check fails.
-- When iOS temporarily hides MyArah, its wake lock is released. MyArah will attempt to reacquire it once visible again, as long as navigation is active. It **cannot** navigate in the background or prevent you from manually locking the phone.
-- iOS may deny/release Wake Lock based on battery, power-saving settings, or browser restrictions. If **Screen may lock** persists, check iPhone **Settings → Display & Brightness → Auto-Lock** and use a longer interval or **Never** if offered. Restore your normal setting after your journey to save battery. Also try disabling Low Power Mode if the setting is unavailable.
-- Keep MyArah open in the foreground on HTTPS (GitHub Pages qualifies). The app cannot guarantee the screen stays on under all iOS versions and conditions.
-- Traffic, routing, GPS smoothing, search, map controls and liquid-glass styles are unchanged by this patch.
+No changes were made to routing, GPS smoothing, search, traffic, or other map features.

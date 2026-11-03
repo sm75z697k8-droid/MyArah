@@ -1528,53 +1528,32 @@ const navHud=$('navHud');
 const navFooter=$('navFooter');
 const navAlert=$('navAlert');
 
-// Screen Wake Lock: keep the display awake only during foreground guidance.
-// A request can be rejected or revoked by iOS. Never claim the screen is
-// protected unless a live WakeLockSentinel confirms it.
+// Keep the screen awake automatically during foreground navigation.
+// This is a best-effort browser request: iOS can revoke or reject it.
+// No extra UI or alerts are shown, so the navigation screen remains uncluttered.
 let navigationWakeLock = null;
 let navigationWakeDesired = false;
 let navigationWakeGeneration = 0;
 let navigationWakePending = null;
-const navigationWakeButton = $('navWake');
 
 function navigationWakeHeld() {
   return !!navigationWakeLock && !navigationWakeLock.released;
 }
-function refreshNavigationWakeUI() {
-  if (!navigationWakeButton) return;
-  const held = navigationWakeHeld();
-  const waiting = navigationWakeDesired && !held && !!navigationWakePending;
-  const unsupported = !navigator.wakeLock || typeof navigator.wakeLock.request !== 'function';
-  navigationWakeButton.textContent = held ? 'Screen on' : waiting ? 'Keeping awake…' : navigationWakeDesired ? 'Screen may lock' : 'Keep awake';
-  navigationWakeButton.classList.toggle('is-held', held);
-  navigationWakeButton.classList.toggle('is-warning', navigationWakeDesired && !held && !waiting);
-  navigationWakeButton.setAttribute('aria-pressed', String(held));
-  navigationWakeButton.setAttribute('aria-label', held ? 'Screen awake during navigation. Tap to turn off.' :
-    waiting ? 'Requesting screen wake lock.' :
-    unsupported ? 'Screen wake lock unavailable. Tap for help.' :
-    'Screen may lock. Tap to try keeping it awake.');
-}
 function requestNavigationWakeLock() {
-  if (!navigationWakeDesired || document.hidden) {
-    refreshNavigationWakeUI();
-    return Promise.resolve(false);
-  }
+  if (!navigationWakeDesired || document.hidden) return Promise.resolve(false);
   if (navigationWakeHeld()) return Promise.resolve(true);
-  if (!navigator.wakeLock || typeof navigator.wakeLock.request !== 'function') {
-    refreshNavigationWakeUI();
-    return Promise.resolve(false);
-  }
+  if (!navigator.wakeLock || typeof navigator.wakeLock.request !== 'function') return Promise.resolve(false);
   const generation = navigationWakeGeneration;
   if (navigationWakePending?.generation === generation) return navigationWakePending.promise;
   let request;
   try {
-    // Start the native request directly from the Start Navigation button tap.
+    // Call synchronously from the existing Start navigation gesture when possible.
     request = navigator.wakeLock.request('screen');
   } catch (_) {
-    refreshNavigationWakeUI();
     return Promise.resolve(false);
   }
   const pending = Promise.resolve(request).then(async lock => {
+    // Do not hold a lock if GPS setup failed, the trip ended or the app was hidden.
     if (!navigationWakeDesired || document.hidden || generation !== navigationWakeGeneration) {
       try { await lock.release(); } catch (_) {}
       return false;
@@ -1582,20 +1561,17 @@ function requestNavigationWakeLock() {
     navigationWakeLock = lock;
     lock.addEventListener('release', () => {
       if (navigationWakeLock === lock) navigationWakeLock = null;
-      refreshNavigationWakeUI();
+      // A new request is made when MyArah returns to the foreground.
     });
-    refreshNavigationWakeUI();
     return true;
   }).catch(err => {
-    console.warn('Could not keep screen awake:', err?.name || err);
-    refreshNavigationWakeUI();
+    // Avoid interrupting navigation with a notification or a second button.
+    console.debug('Screen wake lock unavailable:', err?.name || err);
     return false;
   }).finally(() => {
     if (navigationWakePending?.promise === pending) navigationWakePending = null;
-    refreshNavigationWakeUI();
   });
   navigationWakePending = {generation, promise: pending};
-  refreshNavigationWakeUI();
   return pending;
 }
 function startNavigationWakeLock() {
@@ -1605,27 +1581,14 @@ function startNavigationWakeLock() {
 }
 function stopNavigationWakeLock() {
   navigationWakeDesired = false;
-  navigationWakeGeneration += 1; // Invalidate any in-flight request.
+  navigationWakeGeneration += 1;
   navigationWakePending = null;
   const previous = navigationWakeLock;
   navigationWakeLock = null;
-  refreshNavigationWakeUI();
   if (previous && !previous.released) {
     try { void previous.release().catch(() => {}); } catch (_) {}
   }
 }
-navigationWakeButton.addEventListener('click', () => {
-  if (navigationWakeHeld()) {
-    stopNavigationWakeLock();
-    toast('Keep screen awake turned off');
-    return;
-  }
-  if (navigationWakePending) return;
-  void startNavigationWakeLock().then(held => {
-    if (!held && navigation.active) toast('Screen may lock. Check your iPhone Auto-Lock setting.');
-  });
-});
-refreshNavigationWakeUI();
 
 function refreshNavigationStart(){
   if (!navStartButton) return;
@@ -2232,7 +2195,6 @@ document.addEventListener('visibilitychange',()=>{
     const previous = navigationWakeLock;
     navigationWakeLock = null;
     if (previous && !previous.released) { try { void previous.release().catch(() => {}); } catch (_) {} }
-    refreshNavigationWakeUI();
     if('speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
   }else{
     if (navigationWakeDesired) void requestNavigationWakeLock();
