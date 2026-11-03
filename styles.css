@@ -1692,3 +1692,38 @@ body.dark .nav-footer-buttons #navReroute:not([hidden]){color:#d1edff;background
   #navFooter .nav-footer-buttons button {transition:none;}
   #navFooter #navReroute.nav-action-working svg {animation:none;}
 }
+
+
+/* Filled navigation arrow (Tabler Icons, MIT): visible only during navigation. */
+.myarah-navigation-arrow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  width: 39px;
+  height: 39px;
+  color: #176ec8;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) rotate(var(--myarah-nav-arrow-angle, 0deg));
+  transform-origin: 50% 50%;
+  transition: transform 200ms ease-out, opacity 160ms ease;
+  filter: drop-shadow(0 1px 1px rgba(255,255,255,.95)) drop-shadow(0 2px 5px rgba(7,50,95,.34));
+}
+.myarah-navigation-arrow path {
+  fill: currentColor;
+  stroke: #ffffff;
+  stroke-width: .9px;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
+}
+.app.navigation-active .myarah-location-indicator .location-marker { opacity: 0; }
+.app.navigation-active .myarah-location-indicator .myarah-navigation-arrow { opacity: 1; }
+/* Phone facing cone is useful with the ordinary GPS dot, but is unrelated to
+   car direction: hide it when the turn-by-turn heading arrow takes over. */
+.app.navigation-active .myarah-location-indicator .myarah-heading-cone { opacity: 0 !important; }
+body.dark .myarah-navigation-arrow { color: #67b7ff; filter: drop-shadow(0 0 1.2px rgba(0,0,0,.65)) drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+body.dark .myarah-navigation-arrow path { stroke: #10233a; stroke-width: .9px; }
+@media (prefers-reduced-motion: reduce) {
+  .myarah-navigation-arrow { transition: none; }
+}

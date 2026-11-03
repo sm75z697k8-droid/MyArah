@@ -425,3 +425,20 @@ Your TomTom key is still entered on your device and is not bundled in the ZIP.
 - The app's original actual-arrival handler still requires multiple accurate GPS readings near the destination and near-complete route progress before finishing navigation.
 - Added CSS contrast adjustments for light and dark map appearances; user-facing navigation actions retain accessible labels even though button text is visually hidden.
 - `index.html` references fresh CSS/JS asset versions to avoid Safari / Home Screen stale cache.
+
+
+## Filled navigation direction arrow — latest version
+- During turn-by-turn navigation, the moving map marker uses a **solid blue filled direction arrow** instead of a round GPS dot.
+- The arrow uses the selected route's travel direction, adjusted for map rotation; off-route it uses valid GPS course where possible. It is not meant to indicate the direction in which the phone is pointed.
+- Outside active navigation, your familiar blue GPS location dot and phone-facing cone are unchanged.
+- The filled arrow has a contrasting edge and a low-glare shadow for both light and dark appearances. Navigation buttons, route instructions, traffic and screen-awake behavior are unchanged.
+- The SVG is embedded in app.js and does not need to download during navigation.
+
+### Icon credit and license
+The filled direction arrow is based on **Tabler Icons: navigation-filled** by Paweł Kuna and contributors (https://github.com/tabler/tabler-icons). MIT License, copyright © 2020–2025 Paweł Kuna.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

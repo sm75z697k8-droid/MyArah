@@ -496,6 +496,29 @@ $('tilt').addEventListener('click',()=>{
 let compassHeading = null;
 let compassListening = false;
 let locationCone = null;
+// SVG navigation pointer follows world bearing but rotates relative to the map.
+// The standard location dot and phone-facing cone are still used outside trips.
+let navigationArrowElement = null;
+let navigationArrowWorldBearing = null;
+let navigationArrowDisplayedAngle = null;
+function syncNavigationArrowRotation() {
+  if (!navigationArrowElement || !Number.isFinite(navigationArrowWorldBearing)) return;
+  const target = normalizedHeading(navigationArrowWorldBearing - map.getBearing());
+  // Unwrap north crossings, so 359° -> 1° does not spin a full turn.
+  navigationArrowDisplayedAngle = navigationArrowDisplayedAngle === null ? target :
+    navigationArrowDisplayedAngle + smallestAngle(target - navigationArrowDisplayedAngle);
+  navigationArrowElement.style.setProperty('--myarah-nav-arrow-angle', `${navigationArrowDisplayedAngle}deg`);
+}
+function updateNavigationArrowCourse(bearing) {
+  if (!Number.isFinite(bearing)) return;
+  navigationArrowWorldBearing = normalizedHeading(bearing);
+  syncNavigationArrowRotation();
+}
+function clearNavigationArrowCourse() {
+  navigationArrowWorldBearing = null;
+  navigationArrowDisplayedAngle = null;
+  if (navigationArrowElement) navigationArrowElement.style.removeProperty('--myarah-nav-arrow-angle');
+}
 let displayedConeRotation = null;
 let lastHeadingUpdate = 0;
 
@@ -503,6 +526,7 @@ const normalizedHeading = angle => (angle % 360 + 360) % 360;
 const smallestAngle = angle => ((angle + 540) % 360) - 180;
 
 function drawFacingDirection() {
+  syncNavigationArrowRotation();
   if (!locationCone) return;
   const available = Number.isFinite(compassHeading);
   locationCone.parentElement.classList.toggle('has-heading', available);
@@ -583,8 +607,13 @@ function showUserLocation(coords) {
         </defs>
         <path d="M84 84 L39 15 A82 82 0 0 1 129 15 Z" fill="url(#myarah-heading-fill)"/>
       </svg>
-      <span class="location-marker" aria-hidden="true"></span>`;
+      <span class="location-marker" aria-hidden="true"></span>
+      <!-- Tabler Icons navigation-filled; MIT license, see README credits. -->
+      <svg class="myarah-navigation-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M11.092 2.581a1 1 0 0 1 1.754-.116l.062.116l8.005 17.365c.198.566.05 1.196-.378 1.615a1.53 1.53 0 0 1-1.459.393l-7.077-2.398L5.1 21.894a1.535 1.535 0 0 1-1.52-.231l-.112-.1c-.398-.386-.556-.954-.393-1.556l.047-.15l7.97-17.276z"/>
+      </svg>`;
     locationCone = indicator.querySelector('.myarah-heading-cone');
+    navigationArrowElement = indicator.querySelector('.myarah-navigation-arrow');
     userMarker = new maplibregl.Marker({
       element: indicator,
       anchor: 'center',
@@ -2492,6 +2521,13 @@ function onNavigationLocation(position){
   refreshNavTrip(now);
   animateNavigationMarker(display,matchedDisplayAlong,elapsedMs);
   if(Number.isFinite(bearing))navigation.lastBearing=bearing;
+  const gpsMovingCourse=Number.isFinite(course) && Number.isFinite(speed) &&
+    speed>=1.5 && accuracy<=45 ? course : null;
+  // When leaving the mapped road, don't point along a road we're no longer on.
+  // Retain the previous arrow direction if the car is stopped or course is unknown.
+  if(navigation.offRoute || navigation.joiningRoute || !Number.isFinite(bearing)) {
+    updateNavigationArrowCourse(gpsMovingCourse);
+  } else updateNavigationArrowCourse(bearing);
   followNavigationCamera(display,bearing);
   // Require two close, precise readings before announcing arrival.
   const toDestination=haversineMeters(point,chosen.coords);
@@ -2513,6 +2549,7 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   stopNavigationWakeLock();
   if(!navigation.active)return;
   navigation.active=false;
+  clearNavigationArrowCourse();
   navigation.sessionToken+=1; // invalidate any in-flight route response
   if(navigation.rerouteController){
     navigation.rerouteController.abort();
@@ -2621,6 +2658,7 @@ function startNavigation(){
     appRoot.scrollTop=0;
     myarahRecoverViewport();
     appRoot.classList.add('navigation-active');
+    updateNavigationArrowCourse(matched?.bearing ?? (Number.isFinite(position.coords.heading) && position.coords.speed>1.5 ? position.coords.heading : snap.bearing));
     navHud.hidden=false;navFooter.hidden=false;
     setNavFollowState(true);
     showUserLocation(displayed);
