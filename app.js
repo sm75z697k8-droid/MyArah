@@ -177,6 +177,23 @@ function installMyArahOpticalGlass(mapInstance) {
 installMyArahOpticalGlass(map);
 
 let dark=false,tilted=false,chosen=null,userMarker=null,toastTimer;
+// Visual-only navigation state: keep extruded buildings less prominent while
+// driving without linking the basemap styling to GPS, routes, or lane logic.
+let myarahNavigationMapMode=false;
+function myarahBuildingAppearance(){
+  return {
+    color: dark ? (myarahNavigationMapMode ? '#617486' : '#536a7d') :
+      (myarahNavigationMapMode ? '#cad6e0' : '#bdcad6'),
+    opacity: myarahNavigationMapMode ? (dark ? 0.58 : 0.53) : (dark ? 0.72 : 0.72)
+  };
+}
+function refreshMyArahBuildingAppearance(){
+  const layer='myarah-3d-buildings';
+  if(!map.getLayer(layer))return;
+  const appearance=myarahBuildingAppearance();
+  map.setPaintProperty(layer,'fill-extrusion-color',appearance.color);
+  map.setPaintProperty(layer,'fill-extrusion-opacity',appearance.opacity);
+}
 
 // v4 map-only enhancement: keep the existing OpenFreeMap basemap.
 // An optional OpenFreeMap vector layer supplies real building geometry in 3D.
@@ -197,6 +214,11 @@ function add3DBuildings() {
     url: 'https://tiles.openfreemap.org/planet',
     attribution: '© <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>'
   });
+  // Buildings should never cover the basemap's road/place labels. Put the
+  // extrusion *below* its symbol layers; the blue driving route is drawn above
+  // the buildings separately by syncRouteLayers().
+  const firstLabel=map.getStyle()?.layers?.find(layer=>layer.type==='symbol')?.id;
+  const appearance=myarahBuildingAppearance();
   map.addLayer({
     id: 'myarah-3d-buildings',
     type: 'fill-extrusion',
@@ -206,8 +228,11 @@ function add3DBuildings() {
     filter: ['!=', ['get', 'hide_3d'], true],
     layout: { visibility: tilted ? 'visible' : 'none' },
     paint: {
-      'fill-extrusion-color': dark ? '#6d8193' : '#c0cbd7',
-      'fill-extrusion-opacity': 0.85,
+      'fill-extrusion-color': appearance.color,
+      'fill-extrusion-opacity': appearance.opacity,
+      'fill-extrusion-color-transition': {duration:420,delay:0},
+      'fill-extrusion-opacity-transition': {duration:420,delay:0},
+      'fill-extrusion-vertical-gradient': true,
       'fill-extrusion-height': [
         'interpolate', ['linear'], ['zoom'], 15, 0, 16,
         ['coalesce', ['get', 'render_height'], 8]
@@ -217,7 +242,7 @@ function add3DBuildings() {
         ['coalesce', ['get', 'render_min_height'], 0]
       ]
     }
-  });
+  },firstLabel);
 }
 map.on('style.load', add3DBuildings);
 function toast(message){const el=$('notice');el.textContent=message;el.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.hidden=true,3500)}
@@ -1791,20 +1816,22 @@ function syncRouteLayers() {
   else map.getSource(ROUTE_SOURCE).setData(routeGeojson());
   if (!map.getSource(ROUTE_START_SOURCE)) map.addSource(ROUTE_START_SOURCE, {type:'geojson', data:routeStartGeojson()});
   else map.getSource(ROUTE_START_SOURCE).setData(routeStartGeojson());
-  const add = (name, filter, color, width, blur=0) => {
+  const add = (name, filter, color, width, opacity=1) => {
     if (map.getLayer(name)) return;
     map.addLayer({id:name,type:'line',source:ROUTE_SOURCE,filter,
       layout:{'line-join':'round','line-cap':'round'},
-      paint:{'line-color':color,'line-width':width,'line-opacity':0.97,'line-blur':blur}
+      paint:{'line-color':color,'line-width':width,'line-opacity':opacity}
     }, before);
   };
-  // Draw alternatives first, then a white casing and blue primary route.
-  add(ROUTE_LAYERS[0], ['==',['get','selected'],0], dark ? '#9cabb8' : '#8096aa',
-      ['interpolate',['linear'],['zoom'],9,3,14,5,18,8]);
-  add(ROUTE_LAYERS[1], ['==',['get','selected'],1], dark ? '#172938' : '#ffffff',
-      ['interpolate',['linear'],['zoom'],9,7,14,10,18,14]);
-  add(ROUTE_LAYERS[2], ['==',['get','selected'],1], '#2383dc',
-      ['interpolate',['linear'],['zoom'],9,4,14,6,18,9]);
+  // Keep alternatives subtle. The selected road uses a crisp, contrasting
+  // casing and a saturated blue core with zoom-adaptive widths. Do not infer
+  // traffic or add roads: all line geometry still comes from TomTom routes.
+  add(ROUTE_LAYERS[0], ['==',['get','selected'],0], dark ? '#93a9bd' : '#8498ab',
+      ['interpolate',['linear'],['zoom'],9,2.5,13,3.5,16,5.1,18,6.5,20,8], dark ? 0.57 : 0.51);
+  add(ROUTE_LAYERS[1], ['==',['get','selected'],1], dark ? '#102638' : '#fffefd',
+      ['interpolate',['linear'],['zoom'],9,7,13,9,16,13.2,18,16,20,20],1);
+  add(ROUTE_LAYERS[2], ['==',['get','selected'],1], dark ? '#49a6fa' : '#167bd6',
+      ['interpolate',['linear'],['zoom'],9,4,13,5.7,16,8.6,18,10.8,20,13.4],1);
   if (!map.getLayer('myarah-route-start-dot')) {
     map.addLayer({id:'myarah-route-start-dot',type:'circle',source:ROUTE_START_SOURCE,
       paint:{'circle-radius':7,'circle-color':'#159c7c','circle-stroke-width':3,'circle-stroke-color':'#ffffff'}
@@ -3986,6 +4013,8 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   stopNavigationWakeLock();
   if(!navigation.active)return;
   navigation.active=false;
+  myarahNavigationMapMode=false;
+  refreshMyArahBuildingAppearance();
   navigation.laneController?.abort();navigation.laneController=null;
   navigation.laneSections=[];resetLaneFix();hideNavLaneGuide();
   clearNavigationArrowCourse();
@@ -4116,6 +4145,8 @@ function startNavigation(){
     appRoot.scrollTop=0;
     myarahRecoverViewport();
     appRoot.classList.add('navigation-active');
+    myarahNavigationMapMode=true;
+    refreshMyArahBuildingAppearance();
     updateNavigationArrowCourse(matched?.bearing ?? (Number.isFinite(position.coords.heading) && position.coords.speed>1.5 ? position.coords.heading : snap.bearing));
     navHud.hidden=false;navFooter.hidden=false;
     resetNavSpeed(position.coords.speed,Number(position.coords.accuracy));

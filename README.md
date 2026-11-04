@@ -690,3 +690,12 @@ https://docs.tomtom.com/routing-api/documentation/tomtom-orbis-maps/v3/product-i
 - **Same interface, no extra controls:** existing lane arrows and Liquid Glass styling are unchanged. Lane guidance is still strictly dependent on TomTom legacy API coverage and agreement with the current Orbis route; no guessed lane positions.
 
 Real-world junction coverage and iOS audio timing require on-device testing. Follow actual signs and lane markings.
+
+
+## Refinement — Map & 3D clarity
+- Uses the same OpenFreeMap vector buildings and TomTom routes. No extra key, request, map controls, or dependencies.
+- 3D extrusion is now rendered below basemap place/road labels, so labels remain readable in both appearances.
+- Building tint is softer, and opacity decreases while a trip is active; the change animates over 420 ms when navigation starts/stops. Original 2D/3D toggle, building geometry, and real height values are unchanged.
+- The selected route's white/dark casing and blue core use zoom-adaptive thickness; alternatives are thinner and lighter. The brighter blue core in dark mode and the deeper blue in light mode improve contrast.
+- Light/dark style switches restore the correct map layers, including navigation building emphasis. Route selection, geometry, guidance, traffic, tolls, speed limits, lane advice, search, voice and optical glass are unchanged.
+- Real iPhone rendering must still be checked, especially 3D junctions and areas with dense building polygons.
