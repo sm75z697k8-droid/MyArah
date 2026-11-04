@@ -2637,3 +2637,16 @@ body.dark .nav-lane-hint{color:#c0e2fa}
   .nav-lane-guide{margin-left:0;flex-wrap:wrap}
   .nav-lane-pill{width:25px;height:29px}
 }
+
+
+/* Route preview framing refinement: reserve a side-by-side map in compact
+   landscape instead of letting the bottom sheet conceal the whole route.
+   Normal browsing and active turn-by-turn navigation remain unchanged. */
+@media (orientation:landscape) and (max-height:560px) and (min-width:600px) {
+  .app.route-preview-active:not(.navigation-active) #bottomSheet.sheet {
+    left:max(12px,env(safe-area-inset-left,0px));
+    right:auto;
+    width:min(395px,47vw);
+    max-width:395px;
+  }
+}

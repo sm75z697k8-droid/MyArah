@@ -699,3 +699,28 @@ Real-world junction coverage and iOS audio timing require on-device testing. Fol
 - The selected route's white/dark casing and blue core use zoom-adaptive thickness; alternatives are thinner and lighter. The brighter blue core in dark mode and the deeper blue in light mode improve contrast.
 - Light/dark style switches restore the correct map layers, including navigation building emphasis. Route selection, geometry, guidance, traffic, tolls, speed limits, lane advice, search, voice and optical glass are unchanged.
 - Real iPhone rendering must still be checked, especially 3D junctions and areas with dense building polygons.
+
+
+## Route preview and camera framing refinement
+
+- Route fitting now measures the visible map, live bottom-sheet dimensions,
+  top appearance control and right-side map controls instead of using a fixed
+  fraction of the window height. MapLibre gets per-fit pixel padding that does
+  not persist into turn-by-turn navigation.
+- Preview opens at the medium-height sheet so the route and suggested cards
+  can both be inspected. The sheet still supports peek, half and full states.
+  An expanded portrait sheet that leaves too little map space does not trigger
+  a disruptive camera jump; lowering it restores the preview fit.
+- Landscape route comparison gives the panel a left-side position on small
+  widescreen devices, keeping the driving route visible on the right. This
+  applies only when real route options are available, not during ordinary
+  browsing or active navigation.
+- Selecting a different route uses a 320-ms fade of its previous line and a
+  gentle eased map move. It preserves route-card focus and scroll position.
+- iPhone orientation and sheet-size changes cause a debounced preview refit
+  (except while a text keyboard is open). Reduce Motion remains respected.
+- This is a visual/layout change. TomTom requests, route calculations, lane
+  verification, GPS, speed limits, tolls, voice guidance and optical glass
+  effects are unchanged.
+- QA: route fitting is best checked in Safari on your own iPhone; the code
+  tests cannot confirm real map tile loading or device performance.

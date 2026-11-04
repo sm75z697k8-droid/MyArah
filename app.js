@@ -878,6 +878,8 @@ const sheetExtras = $('sheetExtras');
 const appRoot = document.querySelector('.app');
 const sheetPositions = ['peek', 'half', 'full'];
 let sheetPosition = 'peek';
+// Only active while showing real route choices, not during normal browsing.
+let routeFramingActive = false;
 let sheetGesture = null;
 let suppressSheetClick = false;
 let dragFrame = 0;
@@ -925,6 +927,9 @@ function setSheetPosition(position) {
   sheetExtras.setAttribute('aria-hidden', String(position === 'peek'));
   if (position === 'peek') sheetScroll.scrollTop = 0;
   setSheetHeight(sheetHeights()[position]);
+  // The requested height is used by the framing calculation, so the map can
+  // move in step with the sheet instead of waiting for its CSS transition.
+  if (routeFramingActive) scheduleRoutePreviewRefit(65);
 }
 
 function closestSheetPosition(height) {
@@ -1145,7 +1150,11 @@ myarahLockFrame();
 window.visualViewport?.addEventListener('resize', myarahScheduleViewportUpdate);
 window.visualViewport?.addEventListener('scroll', myarahScheduleViewportUpdate);
 window.addEventListener('resize', myarahScheduleViewportUpdate);
+window.addEventListener('resize',()=>{
+  if(routeFramingActive && !myarahTextFieldActive())scheduleRoutePreviewRefit(210);
+},{passive:true});
 window.addEventListener('orientationchange', () => {
+  if(routeFramingActive)scheduleRoutePreviewRefit(520);
   // A rotation changes the available height legitimately.
   myarahFrameHeight = 0;
   myarahLockFrame(true);
@@ -1841,9 +1850,17 @@ function syncRouteLayers() {
   if (map.getLayer(SELECTED_PIN_LAYER)) map.moveLayer(SELECTED_PIN_LAYER);
   syncTollMapMarkers();
 }
-map.on('style.load', () => { requestAnimationFrame(syncRouteLayers); });
+map.on('style.load', () => {
+  // A style reload discards old paint sources. Stop any pending fade first.
+  clearRouteSelectionTransition();
+  requestAnimationFrame(syncRouteLayers);
+});
 
 function clearRouteGeometry() {
+  cancelRoutePreviewRefit();
+  clearRouteSelectionTransition();
+  routeFramingActive=false;
+  appRoot.classList.remove('route-preview-active');
   routeOptions = [];
   routeSelected = 0;
   routeCards.replaceChildren();
@@ -2045,24 +2062,148 @@ function renderRouteCards() {
   refreshNavigationStart();
 }
 
-function fitRouteOnMap() {
-  if (!routeOptions.length) return;
+// Route preview framing is based on the REAL map, panel and controls rather
+// than a guessed percentage of window.innerHeight. In landscape, the route
+// panel can occupy the left side; in portrait it occupies the bottom.
+const routeFrameControls = document.querySelector('.map-controls');
+const routeFrameTopbar = document.querySelector('.topbar');
+let routeRefitTimer = null;
+let routeFrameToken = 0;
+function cancelRoutePreviewRefit() {
+  routeFrameToken++;
+  if (routeRefitTimer !== null) clearTimeout(routeRefitTimer);
+  routeRefitTimer = null;
+}
+function routeFramingPadding() {
+  const mapRect = map.getContainer().getBoundingClientRect();
+  const panelRect = sheet.getBoundingClientRect();
+  const w = mapRect.width, h = mapRect.height;
+  if (!(w > 260 && h > 210) || !panelRect.width) return null;
+  const sidePanel = panelRect.width < w * .72 &&
+    panelRect.right < mapRect.left + w * .74;
+  const edge = Math.max(16, Math.min(28, Math.min(w,h) * .045));
+  let top = edge, bottom = edge, left = edge, right = edge;
+  // The panel's final height is known before its 430 ms snap animation ends.
+  // This avoids fitting the route underneath an expanding sheet.
+  const targetHeight = sheetHeights()[sheetPosition];
+  const projectedTop = panelRect.bottom - targetHeight;
+  if (sidePanel) {
+    left = Math.max(left, Math.ceil(panelRect.right-mapRect.left + 18));
+  } else {
+    bottom = Math.max(bottom, Math.ceil(mapRect.bottom-projectedTop + 18));
+  }
+  const controlsRect = routeFrameControls?.getBoundingClientRect();
+  if (controlsRect?.width && !navigation.active && sheetPosition !== 'full') {
+    const overlapsSide = controlsRect.right > mapRect.left + w * .65;
+    if (overlapsSide) right = Math.max(right, Math.ceil(mapRect.right-controlsRect.left+10));
+  }
+  const topbarRect = routeFrameTopbar?.getBoundingClientRect();
+  if (topbarRect?.height && !navigation.active) {
+    if (sidePanel && topbarRect.left > mapRect.left + w * .52) {
+      right = Math.max(right, Math.ceil(mapRect.right-topbarRect.left+10));
+    } else if (!sidePanel) {
+      top = Math.max(top, Math.ceil(topbarRect.bottom-mapRect.top+14));
+    }
+  }
+  // Do not submit impossible or tiny camera areas to MapLibre. When the
+  // user fully expands a tall portrait sheet, preserve the last useful view
+  // until the panel is lowered instead of abruptly zooming out behind it.
+  if (w - left - right < 145 || h - top - bottom < 150) return null;
+  return {top:Math.ceil(top),bottom:Math.ceil(bottom),
+    left:Math.ceil(left),right:Math.ceil(right)};
+}
+function fitRouteOnMap({duration=670}={}) {
+  if (!routeOptions[routeSelected] || navigation.active || routePickMode ||
+      sheetGesture || myarahTextFieldActive() || document.hidden) return false;
+  const padding = routeFramingPadding();
+  if (!padding) return false;
   const bounds = new maplibregl.LngLatBounds();
   routeOptions[routeSelected].coordinates.forEach(point=>bounds.extend(point));
+  // linear:true selects easeTo instead of an abrupt flight/zoom-out arc.
+  // Use MapLibre's per-fit padding (not persistent camera padding): route
+  // previews must never offset the live navigation follow-camera.
   map.fitBounds(bounds,{
-    padding:{top:130,bottom:Math.min(window.innerHeight*.48,420),left:35,right:55},
-    pitch:tilted?35:0,bearing:0,
-    duration:reducedMotion?0:850,maxZoom:15
+    padding, linear:true,
+    pitch:tilted?35:0,bearing:0,maxZoom:15,
+    duration:reducedMotion?0:duration,
+    easing:t=>1-Math.pow(1-t,3)
   });
+  return true;
+}
+function scheduleRoutePreviewRefit(delay=90) {
+  cancelRoutePreviewRefit();
+  if (!routeFramingActive) return;
+  const token=routeFrameToken;
+  routeRefitTimer=setTimeout(()=>{
+    routeRefitTimer=null;
+    if(token!==routeFrameToken || !routeFramingActive) return;
+    fitRouteOnMap({duration:reducedMotion?0:570});
+  },delay);
+}
+function updateSelectedRouteCard() {
+  [...routeCards.children].forEach((card,i)=>{
+    const selected=i===routeSelected;
+    card.classList.toggle('is-selected',selected);
+    card.setAttribute('aria-pressed',String(selected));
+    const detail=card.querySelector('.route-card-bottom');
+    if(detail) detail.textContent=selected?'Selected · highlighted blue':'Tap to preview this route';
+  });
+  renderSelectedTolls();
+  refreshNavigationStart();
+}
+// A short, data-backed fade of the previous blue route makes selection feel
+// continuous without inventing any intermediate road geometry.
+const ROUTE_FADE_SOURCE='myarah-route-switch-fade-source';
+const ROUTE_FADE_LAYER='myarah-route-switch-fade';
+let routeFadeTimer=null;
+let routeFadeFrame=0;
+let routeFadeGeneration=0;
+function clearRouteSelectionTransition() {
+  routeFadeGeneration++;
+  if(routeFadeTimer!==null)clearTimeout(routeFadeTimer);
+  if(routeFadeFrame)cancelAnimationFrame(routeFadeFrame);
+  routeFadeTimer=null;routeFadeFrame=0;
+  if(map.getLayer(ROUTE_FADE_LAYER))map.removeLayer(ROUTE_FADE_LAYER);
+  if(map.getSource(ROUTE_FADE_SOURCE))map.removeSource(ROUTE_FADE_SOURCE);
+}
+function fadePreviousRoute(route) {
+  clearRouteSelectionTransition();
+  if(reducedMotion || !route?.coordinates?.length || !map.isStyleLoaded())return;
+  const generation=routeFadeGeneration;
+  const darkTheme=dark;
+  map.addSource(ROUTE_FADE_SOURCE,{type:'geojson',data:{type:'Feature',
+    geometry:{type:'LineString',coordinates:route.coordinates},properties:{}}});
+  map.addLayer({id:ROUTE_FADE_LAYER,type:'line',source:ROUTE_FADE_SOURCE,
+    layout:{'line-cap':'round','line-join':'round'},
+    paint:{'line-color':darkTheme?'#49a6fa':'#167bd6',
+      'line-width':['interpolate',['linear'],['zoom'],9,4,13,5.7,16,8.6,18,10.8,20,13.4],
+      'line-opacity':1,'line-opacity-transition':{duration:320,delay:0}}},
+    map.getLayer(SELECTED_PIN_LAYER)?SELECTED_PIN_LAYER:undefined);
+  routeFadeFrame=requestAnimationFrame(()=>{
+    routeFadeFrame=0;
+    if(generation===routeFadeGeneration && map.getLayer(ROUTE_FADE_LAYER))
+      map.setPaintProperty(ROUTE_FADE_LAYER,'line-opacity',0);
+  });
+  routeFadeTimer=setTimeout(()=>{
+    routeFadeTimer=null;
+    if(generation===routeFadeGeneration)clearRouteSelectionTransition();
+  },440);
 }
 function selectRoute(index) {
-  if (!routeOptions[index]) return;
+  if (!routeOptions[index] || navigation.active || routeBusy) return;
+  if(index===routeSelected){
+    setSheetPosition('half');
+    scheduleRoutePreviewRefit(50);
+    return;
+  }
+  const previous=routeOptions[routeSelected];
   routeSelected=index;
   syncRouteLayers();
-  renderRouteCards();
-  // Leave room to inspect the selected road while keeping cards scrollable.
+  fadePreviousRoute(previous);
+  // Preserve card DOM, focus and internal scroll offset between selections.
+  updateSelectedRouteCard();
   setSheetPosition('half');
-  fitRouteOnMap();
+  scheduleRoutePreviewRefit(55);
 }
 
 function describeRouteError(response) {
@@ -2120,13 +2261,17 @@ async function requestRouteComparison(origin) {
     if (!options.length) throw new Error('No usable driving route was returned. Try a different starting point.');
     routeOptions=options;
     routeSelected=0;
+    routeFramingActive=true;
+    appRoot.classList.add('route-preview-active');
     syncRouteLayers();
     renderRouteCards();
     const n=options.length;
     setRouteStatus(`${n} real route${n===1?'':'s'} found · sorted by traffic-aware ETA, fastest first.`);
     routePlanButton.firstChild.textContent='Refresh routes ';
-    setSheetPosition('full');
-    requestAnimationFrame(fitRouteOnMap);
+    // A half-height sheet leaves useful map area; users can still expand it
+    // to inspect all cards and toll details without losing the selected route.
+    setSheetPosition('half');
+    scheduleRoutePreviewRefit(75);
   } catch(error) {
     if (job!==routeJob) return;
     const msg = error.name==='AbortError' ? 'Route request timed out. Please retry.' :
@@ -4069,7 +4214,7 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   refreshNavigationStart();
   setSheetPosition('peek');
   toast(message);
-  if(routeOptions.length)requestAnimationFrame(fitRouteOnMap);
+  if(routeOptions.length)scheduleRoutePreviewRefit(100);
 }
 function startNavigation(){
   const route=routeOptions[routeSelected];
