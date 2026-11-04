@@ -2244,6 +2244,7 @@ const navigation = {
   // Speed-limit warnings only use accurate matches onto this exact route.
   speedLimitEligible:false, speedLimitWarningCount:0, speedLimitWarning:false,
   speedLimitState:null, speedLimitWarningSince:0, speedLimitClearCount:0,
+  laneSections:[], laneController:null,
   lastAlert:''
 };
 const navStartButton=$('navStart');
@@ -3120,6 +3121,7 @@ function showProceedToRoute(distance){
     `${navDistance(Math.max(0,distance))} from route` : 'Join the route';
   setNavInstructionCopy('Proceed to the route');
   const next=$('navNextTurn');if(next)next.hidden=true;
+  hideNavLaneGuide();
 }
 // TomTom Orbis routeOffsetInMeters is the position of the *actual maneuver*,
 // not an early-warning marker. Only move to the next card after that position.
@@ -3259,6 +3261,195 @@ function refreshSecondaryNavigationTurn(route,current,distanceToCurrent){
   $('navNextTurnDistance').textContent=relativeText;
   row.hidden=false;
 }
+
+// === Optional verified TomTom lane guidance (legacy Maps Routing API v1). ===
+// Orbis v3 intentionally DOES NOT return lane sections. This separate legacy
+// request never replaces the selected Orbis route. It is only permitted to
+// advise lanes after independent geometry, heading and maneuver checks.
+// In Malaysia, coverage and key entitlements vary. Missing data => no UI.
+const MYARAH_LEGACY_LANES_ENDPOINT='https://api.tomtom.com/routing/1/calculateRoute/';
+const NAV_LANE_DISPLAY_M=440;
+const NAV_LANE_ACCURACY_M=35;
+const NAV_LANE_TYPES=new Set([
+  'STRAIGHT','SLIGHT_LEFT','LEFT','SHARP_LEFT','SLIGHT_RIGHT',
+  'RIGHT','SHARP_RIGHT','LEFT_U_TURN','RIGHT_U_TURN'
+]);
+function hideNavLaneGuide(){
+  const row=$('navLaneGuide');if(row)row.hidden=true;
+}
+function laneActionGroup(code){
+  const s=String(code||'').toUpperCase();
+  if(s==='STRAIGHT')return 'straight';
+  if(s.includes('U_TURN'))return 'uturn';
+  if(s.includes('LEFT'))return 'left';
+  if(s.includes('RIGHT'))return 'right';
+  return null;
+}
+function expectedLaneAction(maneuver){
+  const m=String(maneuver||'');
+  if(/^(turn|keep|exitMotorway|switchMotorway|merge|enterCarpoolLane|exitCarpoolLane)/i.test(m)){
+    if(/Left/i.test(m))return 'left';
+    if(/Right/i.test(m))return 'right';
+  }
+  if(/^makeUTurn$/i.test(m))return 'uturn';
+  return null; // Not enough information for other maneuvers
+}
+function legacyLanePoint(p){
+  const lon=Number(p?.longitude),lat=Number(p?.latitude);
+  return Number.isFinite(lon)&&Number.isFinite(lat)&&Math.abs(lat)<=90&&Math.abs(lon)<=180
+    ? [lon,lat] : null;
+}
+function legacyLaneAligned(legacy,index){
+  const a=routeGeometryIndex(legacy);
+  if(!a || !index || Math.abs(a.total/index.total-1)>.16)return false;
+  let close=0,last=-Infinity;
+  for(const fraction of [.1,.3,.5,.7,.9]){
+    const point=routePointAt(a,a.total*fraction);
+    const m=point&&matchGpsToRoute(index,point,{accuracy:12});
+    if(!m || m.nearestDistance>42)continue;
+    if(m.along<last-35)return false;
+    last=m.along;
+    close++;
+  }
+  return close>=4; // Most of the road, not just the same origin/destination
+}
+function normalizeTrustedLaneSections(payload,route){
+  const raw=payload?.routes?.[0];
+  if(!route?.coordinates?.length || raw?.legs?.length!==1)return [];
+  const points=raw.legs[0]?.points?.map(legacyLanePoint);
+  if(!Array.isArray(points) || points.length<2 || points.some(p=>!p))return [];
+  const index=routeGeometryIndex(route.coordinates);
+  if(!legacyLaneAligned(points,index))return [];
+  const result=[];
+  const sections=Array.isArray(raw.sections)?raw.sections:[];
+  for(const section of sections){
+    if(String(section?.sectionType||'').toUpperCase()!=='LANES')continue;
+    const i=section.startPointIndex,j=section.endPointIndex;
+    if(!Number.isInteger(i)||!Number.isInteger(j)||i<0||j<=i||j>=points.length)continue;
+    const original=section.lanes;
+    if(!Array.isArray(original)||original.length<2||original.length>6)continue;
+    const lanes=original.map(lane=>{
+      const dirs=Array.isArray(lane?.directions)?lane.directions:[];
+      const follow=typeof lane?.follow==='string'?lane.follow.toUpperCase():null;
+      return {directions:dirs.filter(d=>NAV_LANE_TYPES.has(d)).slice(0,3),
+        follow:follow&&NAV_LANE_TYPES.has(follow)?follow:null};
+    });
+    if(lanes.some(l=>!l.directions.length || (l.follow&&!l.directions.includes(l.follow))))continue;
+    const selected=lanes.filter(l=>l.follow).length;
+    if(!selected||selected===lanes.length)continue;
+    const at=matchGpsToRoute(index,points[j],{accuracy:8});
+    const from=matchGpsToRoute(index,points[i],{accuracy:8});
+    if(!at||!from||at.nearestDistance>26||from.nearestDistance>35||
+      at.along<from.along-18)continue;
+    // A legacy lane section cannot be grafted onto an unrelated parallel road.
+    const legacyHeading=bearingBetween(points[Math.max(i,j-1)],points[j]);
+    if(Number.isFinite(legacyHeading) && Number.isFinite(at.bearing) &&
+       Math.abs(smallestAngle(legacyHeading-at.bearing))>34)continue;
+    const routeOffset=at.along/index.total*route.meters;
+    const candidates=navGuidanceInstructions(route)
+      .filter(n=>expectedLaneAction(n.maneuver))
+      .map(n=>({instruction:n,distance:n.offset-routeOffset}))
+      .filter(n=>n.distance>=-28 && n.distance<=260)
+      .sort((a,b)=>Math.abs(a.distance)-Math.abs(b.distance));
+    const candidate=candidates[0];
+    // Two similar maneuvers very close together are ambiguous: never guess.
+    if(!candidate || (candidates[1] &&
+       Math.abs(Math.abs(candidates[1].distance)-Math.abs(candidate.distance))<65))continue;
+    const expected=expectedLaneAction(candidate.instruction.maneuver);
+    if(lanes.some(l=>l.follow&&laneActionGroup(l.follow)!==expected))continue;
+    const existing=result.findIndex(r=>r.offset===candidate.instruction.offset);
+    const item={offset:candidate.instruction.offset,startOffset:from.along/index.total*route.meters,
+      lanes,sectionDistance:Math.abs(candidate.distance)};
+    if(existing<0)result.push(item);
+    else if(item.sectionDistance<result[existing].sectionDistance)result[existing]=item;
+  }
+  return result.sort((a,b)=>a.offset-b.offset);
+}
+function laneDirectionSvg(code){
+  switch(laneActionGroup(code)){
+    case 'left':return '<path d="M19 19V11a4 4 0 0 0-4-4H5"/><path d="m11 2-6 5 6 5"/>';
+    case 'right':return '<path d="M5 19V11a4 4 0 0 1 4-4h10"/><path d="m13 2 6 5-6 5"/>';
+    case 'uturn':return '<path d="M19 20V9a6 6 0 0 0-12 0v8"/><path d="m3 13 4 4 4-4"/>';
+    default:return '<path d="M12 20V4"/><path d="m5 11 7-7 7 7"/>';
+  }
+}
+function trustedLaneForManeuver(instruction,progress){
+  if(!instruction || !navigation.active || navigation.offRoute || navigation.joiningRoute ||
+     navigation.rerouting || !navigation.speedLimitEligible ||
+     !Number.isFinite(navigation.lastAcceptedTime)||
+     !Number.isFinite(navigation.lastRawFix?.accuracy)||
+     navigation.lastRawFix.accuracy>NAV_LANE_ACCURACY_M||
+     Date.now()-navigation.lastAcceptedTime>12000)return null;
+  const distance=instruction.offset-progress;
+  if(distance<12 || distance>NAV_LANE_DISPLAY_M)return null;
+  return navigation.laneSections.find(s=>Math.abs(s.offset-instruction.offset)<1)||null;
+}
+function laneRecommendationText(lanes){
+  const indices=lanes.map((l,i)=>l.follow?i:-1).filter(i=>i>=0);
+  if(!indices.length)return '';
+  const n=lanes.length;
+  if(indices.length===1){
+    const i=indices[0];
+    return i===0?'Use left lane':i===n-1?'Use right lane':
+      n%2===1&&i===Math.floor(n/2)?'Use middle lane':'Use highlighted lane';
+  }
+  if(indices.every((x,i)=>x===i))return `Use ${indices.length} left lanes`;
+  if(indices.every((x,i)=>x===n-indices.length+i))return `Use ${indices.length} right lanes`;
+  return 'Use highlighted lanes';
+}
+function renderNavLaneGuide(instruction,progress){
+  const section=trustedLaneForManeuver(instruction,progress);
+  if(!section){hideNavLaneGuide();return null;}
+  const container=$('navLaneChoices'),label=$('navLaneHint');
+  if(!container||!label)return null;
+  const fragment=document.createDocumentFragment();
+  for(const lane of section.lanes){
+    const pill=document.createElement('span');
+    pill.className='nav-lane-pill'+(lane.follow?' is-recommended':'');
+    const symbol=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    symbol.setAttribute('viewBox','0 0 24 24');
+    symbol.setAttribute('aria-hidden','true');
+    symbol.innerHTML=laneDirectionSvg(lane.follow||lane.directions[0]);
+    pill.appendChild(symbol);fragment.appendChild(pill);
+  }
+  container.replaceChildren(fragment);
+  label.textContent=laneRecommendationText(section.lanes);
+  $('navLaneGuide').hidden=false;
+  return section;
+}
+async function requestVerifiedLaneSections(route){
+  if(!navigation.active || !route || !trafficKey || !chosen?.coords)return;
+  navigation.laneController?.abort();
+  navigation.laneController=new AbortController();
+  const controller=navigation.laneController;
+  const token=navigation.sessionToken;
+  const destinationId=navigation.destinationId;
+  const start=route.coordinates[0],end=route.coordinates[route.coordinates.length-1];
+  // Legacy v1 is a separate opt-in product on some TomTom keys. Failure is
+  // expected and must never delay GPS navigation, routing, or the normal HUD.
+  const loc=p=>`${p[1].toFixed(6)},${p[0].toFixed(6)}`;
+  const url=MYARAH_LEGACY_LANES_ENDPOINT+`${loc(start)}:${loc(end)}/json?`+
+    new URLSearchParams({key:trafficKey,travelMode:'car',routeType:'fastest',
+      traffic:'true',sectionType:'lanes',instructionsType:'text',
+      routeRepresentation:'polyline',language:'en-GB'}).toString();
+  const timeout=setTimeout(()=>controller.abort(),14000);
+  try{
+    const response=await fetch(url,{cache:'no-store',signal:controller.signal});
+    if(!response.ok)return;
+    const data=await response.json();
+    if(!navigation.active || navigation.sessionToken!==token ||
+       navigation.destinationId!==destinationId || navigation.route!==route)return;
+    navigation.laneSections=normalizeTrustedLaneSections(data,route);
+    if(navigation.laneSections.length>0 && Number.isFinite(navigation.lastProgress)){
+      refreshNavigationGuidance(navigation.lastProgress,navigation.guidanceSpeed);
+    }
+  }catch(_){/* no verified lanes: preserve regular instructions */}
+  finally{
+    clearTimeout(timeout);
+    if(navigation.laneController===controller)navigation.laneController=null;
+  }
+}
+
 function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
   const route=navigation.route;
   if(!route)return;
@@ -3271,6 +3462,7 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
     $('navTurnDistance').textContent=navDistance(Math.max(0,(Number(route.meters)||0)-progress));
     setNavInstructionCopy('Continue along the route');
     const following=$('navNextTurn');if(following)following.hidden=true;
+    hideNavLaneGuide();
     return;
   }
   const index=route.instructions.indexOf(next);
@@ -3297,12 +3489,14 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
     setNavInstructionCopy(remaining>180 ? 'Continue towards your destination' :
       side ? `Destination ahead on the ${side}` : 'Approaching your destination');
     const later=$('navNextTurn');if(later)later.hidden=true;
+    hideNavLaneGuide();
   }else{
     showNavManeuverIcon('navTurnSymbol',next.maneuver);
     $('navTurnDistance').textContent=navDistance(distance);
     const display=conciseNavInstruction(next);
     setNavInstructionCopy(display.action,display.detail);
     refreshSecondaryNavigationTurn(route,next,distance);
+    renderNavLaneGuide(next,progress);
   }
 
   // Only accepted, on-route GPS progress drives this function. An early cue
@@ -3327,6 +3521,13 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
   let message=isArrivalInstruction(next)
     ? `Your destination is ${speechDistance(Math.max(10,distance))} ahead.`
     : spokenTurnInstruction(next,distance);
+  // Lane preparation is spoken ONLY when the provider's recommended lanes
+  // match this selected Orbis maneuver. Do not add a separate interruption.
+  const lane=phase==='prepare' ? trustedLaneForManeuver(next,progress):null;
+  if(lane){
+    const advice=laneRecommendationText(lane.lanes);
+    if(advice)message=advice+'. '+message;
+  }
   if(navigation.pendingGuidanceKey===key)return;
   const token=navigation.sessionToken;
   navigation.pendingGuidanceKey=key;
@@ -3681,6 +3882,8 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   stopNavigationWakeLock();
   if(!navigation.active)return;
   navigation.active=false;
+  navigation.laneController?.abort();navigation.laneController=null;
+  navigation.laneSections=[];hideNavLaneGuide();
   clearNavigationArrowCourse();
   navigation.sessionToken+=1; // invalidate any in-flight route response
   if(navigation.rerouteController){
@@ -3795,6 +3998,9 @@ function startNavigation(){
       offSince:0,onCount:0,arrivalCount:0
     });
     navigation.sessionToken+=1;
+    navigation.laneSections=[];
+    navigation.laneController?.abort();navigation.laneController=null;
+    hideNavLaneGuide();
     navigation.lastReroute=0;
     navigation.rerouting=false;
     resetJoinState(initial,point);
@@ -3841,6 +4047,7 @@ function startNavigation(){
         updateNavAlert('GPS temporarily unavailable. Keep the app open and check your location.');
       },{enableHighAccuracy:true,maximumAge:1000,timeout:15000});
     }catch(_){endNavigation('Could not start live GPS tracking');}
+    void requestVerifiedLaneSections(route);
     refreshNavigationStart();
   },err=>{
     stopNavigationWakeLock();
@@ -3863,6 +4070,8 @@ async function recalculateNavigation({automatic=false}={}){
   if(automatic && (!navigation.lastRawFix || now-navigation.lastAcceptedTime>12000 ||
       navigation.lastRawFix.accuracy>55))return false;
   navigation.rerouting=true;
+  navigation.laneController?.abort();navigation.laneController=null;
+  navigation.laneSections=[];hideNavLaneGuide();
   navigation.lastReroute=now;
   navigation.autoFailure=false;
   const token=navigation.sessionToken;
@@ -3907,6 +4116,7 @@ async function recalculateNavigation({automatic=false}={}){
     routeOptions=[route];routeSelected=0;
     routeOrigin={coords:origin,kind:'gps',label:'Current location'};
     navigation.route=route;navigation.routeIndex=index;
+    navigation.laneSections=[];hideNavLaneGuide();
     navigation.lastProgress=0;navigation.turnIndex=-1;
     navigation.spoken.clear();navigation.alertSpoken.clear();
     navigation.pendingAlertKey=null;navigation.pendingGuidanceKey=null;
@@ -3924,6 +4134,7 @@ async function recalculateNavigation({automatic=false}={}){
     syncRouteLayers();renderRouteCards();
     const pos=navigation.lastPosition;
     if(pos)onNavigationLocation(pos);
+    void requestVerifiedLaneSections(route);
     if(navigation.joiningRoute){
       showProceedToRoute(newMatch?.nearestDistance);
       announceNavVoiceAlert('reroute-join','Route updated. Proceed to the route.');

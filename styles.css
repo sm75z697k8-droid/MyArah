@@ -2604,3 +2604,36 @@ body[data-myarah-optical="on"] #navSpeed[data-overspeed="true"] .nav-speed-unit{
 @media (prefers-reduced-motion:reduce){
   #navSpeed[data-overspeed="true"].nav-speed-gauge{transition:none;}
 }
+
+/* Verified lane guidance: hidden by default; only populated from matched
+   TomTom Maps v1 lane sections. No inferred lane count or fake lane diagram. */
+#navLaneGuide[hidden]{display:none!important}
+.nav-lane-guide{
+  display:flex;align-items:center;gap:8px;min-width:0;
+  margin-left:70px;padding:9px 0 0;border-top:1px solid rgba(30,68,101,.12);
+}
+.nav-lane-heading{font-size:10px;font-weight:800;letter-spacing:.075em;color:#46769e;flex:0 0 auto}
+.nav-lane-choices{display:flex;align-items:center;gap:4px;flex:0 0 auto}
+.nav-lane-pill{
+  display:grid;place-items:center;width:27px;height:31px;border-radius:8px;
+  color:#526577;background:rgba(77,102,122,.1);border:1px solid rgba(55,75,90,.1);
+}
+.nav-lane-pill svg{width:19px;height:19px;display:block;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:2.5}
+.nav-lane-pill.is-recommended{color:#fff;background:#196db4;border-color:#196db4;box-shadow:0 2px 6px rgba(24,104,177,.18)}
+.nav-lane-hint{font-size:12px;font-weight:760;line-height:1.2;color:#235d8a;min-width:0;overflow-wrap:anywhere}
+body.dark .nav-lane-guide{border-top-color:rgba(203,226,245,.16)}
+body.dark .nav-lane-heading{color:#aecbe3}
+body.dark .nav-lane-pill{background:rgba(184,212,234,.13);border-color:rgba(202,227,248,.15);color:#c8d9e8}
+body.dark .nav-lane-pill.is-recommended{color:#fff;background:#266eaf;border-color:#67b3ed}
+body.dark .nav-lane-hint{color:#c0e2fa}
+@media(orientation:landscape) and (max-height:560px){
+  .nav-lane-guide{margin-left:61px;padding-top:7px;gap:6px;flex-wrap:wrap}
+  .nav-lane-heading{font-size:9px}
+  .nav-lane-pill{width:23px;height:26px;border-radius:7px}
+  .nav-lane-pill svg{width:17px;height:17px}
+  .nav-lane-hint{font-size:10px}
+}
+@media(max-width:365px){
+  .nav-lane-guide{margin-left:0;flex-wrap:wrap}
+  .nav-lane-pill{width:25px;height:29px}
+}

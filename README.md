@@ -650,3 +650,30 @@ No private API keys are embedded. Navigation, glass controls and GPS remain unch
 - Reversible, subtle scale/fade motion with a small pointer; repositions on viewport/orientation changes while open.
 - All three voice modes, navigation audio, keyboard behavior, and light/dark glass styling remain unchanged.
 - Reduced Motion bypasses the movement animation.
+
+
+## Verified lane guidance (experimental, coverage-dependent)
+
+MyArah can optionally show **recommended lanes** in the current maneuver banner.
+It does not claim to know your vehicle's current lane. For each trip it requests
+TomTom Maps Routing API v1 with `sectionType=lanes`, which returns per-lane
+`directions` and `follow` fields **if the TomTom key is entitled to that API and
+lanes have been mapped for the junction**. TomTom Orbis Routing v3, used for
+the actual navigation route, does not return these fields.
+
+The classic API supplies a second route; MyArah does **not** replace the Orbis
+route. It displays lane guidance only if the legacy route geometry closely
+matches the chosen Orbis route (sampled overlap, local offset, nearby section
+location, direction and maneuver agreement), the GPS fix is reliably on-route,
+and the upcoming maneuver is within 440 m. Both the lane graphics and lane
+preparation voice phrase are automatically omitted if verification fails.
+
+The voice's Normal mode may prepend e.g. “Use left lane.” to the existing
+preparation announcement. Only Alerts and Off keep their established behavior.
+No new buttons, keys or unsafe guessed lane directions have been added.
+One extra TomTom legacy routing call per started/recalculated navigation session
+may count towards your API quota. Classic Routing API entitlement is not
+guaranteed by Orbis access; actual coverage in Malaysia remains to be tested.
+Always obey road markings, signs and temporary lane closures.
+References: https://docs.tomtom.com/routing-api/documentation/tomtom-maps/v1/guidance-instructions
+https://docs.tomtom.com/routing-api/documentation/tomtom-orbis-maps/v3/product-information/migration-guide
