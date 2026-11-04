@@ -724,3 +724,12 @@ Real-world junction coverage and iOS audio timing require on-device testing. Fol
   effects are unchanged.
 - QA: route fitting is best checked in Safari on your own iPhone; the code
   tests cannot confirm real map tile loading or device performance.
+
+
+## Liquid Glass performance refinement (November 2026)
+- Keeps the same optical refraction, three-channel chromatic separation, frosted finish, icon contrast and one-map-snapshot sampling architecture.
+- Skips optical rendering for glass controls that are hidden, transparent, offscreen, or inside hidden/inert UI; CSS fallback remains available via `?glass=off`.
+- Uses adaptive sampling resolution only after several consecutive expensive frames (floor 78% of prior sampling scale). The original full-resolution sampling returns gradually when frame costs improve.
+- No permanent glass refresh timer on a stationary map: MapLibre render/move/idle events trigger updates, plus a bounded window during button/layout transitions. The final map frame is retained.
+- Pauses any pending glass work when the page is backgrounded; refreshes after returning.
+- No new libraries, network requests, location polling, map rendering contexts or controls. This is a render-efficiency change, not a claim of measured iPhone battery savings. Test actual Safari smoothness and visual appearance on-device.

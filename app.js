@@ -16,8 +16,9 @@ const map = new maplibregl.Map({container:'map',style:mapStyle(false),center:INI
    recomputed the distortion for every frame. This version takes ONE scaled
    map snapshot per update, then samples small areas from that 2D snapshot.
    Each lens caches its warp lookup and output ImageData until its size changes.
-   Refreshes target ~20 fps (rather than 10), with an adaptive cap when pixel
-   capture is slow. No extra location polling, WebGL contexts or dependencies.
+   Refreshes target ~20 fps when the map moves, with an adaptive cap and
+   resolution fallback when pixel capture is slow. Hidden controls are skipped
+   and static maps stop optical redraws after a final settled frame. No extra location polling, WebGL contexts or dependencies.
    ?glass=off still disables sampling and preserveDrawingBuffer for comparison.
    This is an approximation of iOS Liquid Glass, not Apple's native material. */
 function installMyArahOpticalGlass(mapInstance) {
@@ -48,10 +49,18 @@ function installMyArahOpticalGlass(mapInstance) {
   const maxDpr = 1.35, pad = 12;
   let disabled = false, lastPaint = -Infinity, pendingFrame = 0, pendingTimer = 0;
   let frameInterval = 50; // Aim for 20 optical updates per second when affordable.
+  // Retain full-quality optics when affordable; reduce pixel work gradually if
+  // this device takes too long to capture/warp a frame. Never remove refraction.
+  let samplingScale = 1, slowFrames = 0, fastFrames = 0;
+  // UI transitions can move controls without a MapLibre render event.
+  // A short, bounded refresh during those transitions is enough; no idle loop.
+  let uiRefreshUntil = 0, uiRefreshTimer = 0;
   function clearLens(err) {
     disabled = true;
     if(pendingFrame) cancelAnimationFrame(pendingFrame);
     if(pendingTimer) clearTimeout(pendingTimer);
+    if(uiRefreshTimer) clearTimeout(uiRefreshTimer);
+    pendingFrame=0; pendingTimer=0; uiRefreshTimer=0;
     document.body.removeAttribute('data-myarah-optical');
     for(const lens of lenses) lens.canvas.remove();
     if(err) console.warn('MyArah refractive glass unavailable; using CSS glass:',err?.message||err);
@@ -89,15 +98,23 @@ function installMyArahOpticalGlass(mapInstance) {
   }
   function visibleRect(lens) {
     const {root}=lens;
-    if(root.hidden || root.closest('[hidden]') || getComputedStyle(root).display==='none')return null;
+    if(!root.isConnected || root.hidden || root.closest('[hidden], [inert]'))return null;
+    // In MyArah some buttons stay mounted while their parent fades out. A
+    // viewport-only test would waste CPU repainting these invisible canvases.
+    for(let el=root;el && el.nodeType===1;el=el.parentElement){
+      const style=getComputedStyle(el);
+      if(style.display==='none' || style.visibility==='hidden' ||
+         style.visibility==='collapse' || Number(style.opacity)<0.035)return null;
+    }
     const rect=root.getBoundingClientRect();
     if(rect.width<28 || rect.height<28)return null;
-    // Ignore controls outside the viewport, including the hidden bottom sheet.
-    if(rect.right<0 || rect.bottom<0 || rect.left>innerWidth || rect.top>innerHeight)return null;
+    const vw=document.documentElement.clientWidth||innerWidth;
+    const vh=document.documentElement.clientHeight||innerHeight;
+    if(rect.right<=0 || rect.bottom<=0 || rect.left>=vw || rect.top>=vh)return null;
     return rect;
   }
   function paintLens(lens,rect,mapRect){
-    const dpr=Math.min(maxDpr,Math.max(1,window.devicePixelRatio||1));
+    const dpr=Math.min(maxDpr,Math.max(1,window.devicePixelRatio||1))*samplingScale;
     const w=Math.max(1,Math.min(160,Math.round(rect.width*dpr)));
     const h=Math.max(1,Math.min(160,Math.round(rect.height*dpr)));
     if(!lens.lookup || lens.lookup.w!==w || lens.lookup.h!==h)rebuildWarp(lens,w,h);
@@ -133,7 +150,9 @@ function installMyArahOpticalGlass(mapInstance) {
       if(!mapRect.width||!mapRect.height)return;
       const visible=lenses.map(l=>({lens:l,rect:visibleRect(l)})).filter(item=>item.rect);
       if(!visible.length)return;
-      const scale=Math.min(maxDpr,Math.max(1,window.devicePixelRatio||1),1800/Math.max(mapRect.width,mapRect.height));
+      const scale=Math.min(maxDpr*samplingScale,
+        Math.max(1,window.devicePixelRatio||1)*samplingScale,
+        1800/Math.max(mapRect.width,mapRect.height));
       const fw=Math.max(1,Math.round(mapRect.width*scale));
       const fh=Math.max(1,Math.round(mapRect.height*scale));
       if(frame.width!==fw||frame.height!==fh){frame.width=fw;frame.height=fh;}
@@ -146,6 +165,13 @@ function installMyArahOpticalGlass(mapInstance) {
       // Use real execution cost rather than a fixed device-model guess.
       const desired=cost>26?Math.min(110,cost*3):cost>15?65:50;
       frameInterval=Math.max(50,Math.min(110,frameInterval*.75+desired*.25));
+      if(cost>26){slowFrames++;fastFrames=0;}
+      else if(cost<12){fastFrames++;slowFrames=0;}
+      else {slowFrames=0;fastFrames=0;}
+      // Hysteresis prevents visible texture-resolution oscillation. Keep a
+      // minimum of 0.78x, with the same warp/tint/edge treatment at every tier.
+      if(slowFrames>=5){samplingScale=Math.max(.78,Math.round((samplingScale-.08)*100)/100);slowFrames=0;}
+      if(fastFrames>=28){samplingScale=Math.min(1,Math.round((samplingScale+.04)*100)/100);fastFrames=0;}
     } catch(err) { clearLens(err); }
   }
   function schedule() {
@@ -159,6 +185,23 @@ function installMyArahOpticalGlass(mapInstance) {
       if(!disabled && !document.hidden && !pendingFrame)pendingFrame=requestAnimationFrame(draw);
     },Math.ceil(wait));
   }
+  // Only refresh changed UI positions briefly: no permanent interval while
+  // the map is static (a key battery saver during parked/idle navigation).
+  function refreshUiFor(ms=450){
+    if(disabled || document.hidden)return;
+    uiRefreshUntil=Math.max(uiRefreshUntil,performance.now()+ms);
+    schedule();
+    if(uiRefreshTimer)return;
+    const tick=()=>{
+      uiRefreshTimer=0;
+      if(disabled||document.hidden)return;
+      if(performance.now()<uiRefreshUntil){
+        schedule();
+        uiRefreshTimer=setTimeout(tick,Math.max(55,Math.ceil(frameInterval)));
+      }else{schedule();} // last frame captures final control position
+    };
+    uiRefreshTimer=setTimeout(tick,Math.max(55,Math.ceil(frameInterval)));
+  }
   document.body.setAttribute('data-myarah-optical','on');
   mapInstance.on('render',schedule);
   mapInstance.on('resize',schedule);
@@ -168,10 +211,32 @@ function installMyArahOpticalGlass(mapInstance) {
     if(document.hidden){
       if(pendingFrame)cancelAnimationFrame(pendingFrame);
       if(pendingTimer)clearTimeout(pendingTimer);
-      pendingFrame=0;pendingTimer=0;
+      if(uiRefreshTimer)clearTimeout(uiRefreshTimer);
+      pendingFrame=0;pendingTimer=0;uiRefreshTimer=0;uiRefreshUntil=0;
     } else {lastPaint=-Infinity;schedule();}
   });
-  window.addEventListener('resize',()=>{lastPaint=-Infinity;schedule();},{passive:true});
+  window.addEventListener('resize',()=>{lastPaint=-Infinity;refreshUiFor(280);},{passive:true});
+  window.addEventListener('orientationchange',()=>refreshUiFor(650),{passive:true});
+  const appRoot=document.querySelector('.app');
+  if(appRoot){
+    // Sheet, navigation dock and recenter controls animate independently of
+    // the map, so detect their class/state changes without polling forever.
+    const observer=new MutationObserver(records=>{
+      if(records.some(r=>r.attributeName==='class' || r.attributeName==='hidden' ||
+                         r.attributeName==='style' || r.attributeName==='inert'))refreshUiFor(420);
+    });
+    observer.observe(appRoot,{attributes:true,attributeFilter:['class']});
+    for(const lens of lenses){
+      observer.observe(lens.root,{attributes:true,attributeFilter:['class','style','hidden','inert']});
+    }
+    appRoot.addEventListener('transitionrun',event=>{
+      if(event.target===appRoot || lenses.some(l=>l.root===event.target || l.root.contains(event.target)))refreshUiFor(600);
+    },{passive:true});
+  }
+  if(typeof ResizeObserver!=='undefined'){
+    const ro=new ResizeObserver(()=>refreshUiFor(320));
+    for(const lens of lenses)ro.observe(lens.root);
+  }
   schedule();
 }
 installMyArahOpticalGlass(map);
