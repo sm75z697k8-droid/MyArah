@@ -665,11 +665,13 @@ The classic API supplies a second route; MyArah does **not** replace the Orbis
 route. It displays lane guidance only if the legacy route geometry closely
 matches the chosen Orbis route (sampled overlap, local offset, nearby section
 location, direction and maneuver agreement), the GPS fix is reliably on-route,
-and the upcoming maneuver is within 440 m. Both the lane graphics and lane
-preparation voice phrase are automatically omitted if verification fails.
+and the upcoming maneuver is within a speed-adaptive preparation window that
+never exceeds the provider-mapped lane section (maximum 1.25 km). Both the lane
+graphics and lane voice phrase are omitted if verification fails.
 
-The voice's Normal mode may prepend e.g. “Use left lane.” to the existing
-preparation announcement. Only Alerts and Off keep their established behavior.
+Normal voice mode may give an earlier lane-preparation cue at driving speeds,
+then the usual turn reminder without repeating the lane direction. Only Alerts
+and Off keep their established behavior.
 No new buttons, keys or unsafe guessed lane directions have been added.
 One extra TomTom legacy routing call per started/recalculated navigation session
 may count towards your API quota. Classic Routing API entitlement is not
@@ -677,3 +679,14 @@ guaranteed by Orbis access; actual coverage in Malaysia remains to be tested.
 Always obey road markings, signs and temporary lane closures.
 References: https://docs.tomtom.com/routing-api/documentation/tomtom-maps/v1/guidance-instructions
 https://docs.tomtom.com/routing-api/documentation/tomtom-orbis-maps/v3/product-information/migration-guide
+
+
+## Lane guidance accuracy & timing refinement
+
+- **Speed-aware lane preparation:** the lane banner can appear farther ahead at high speed (up to 1.25 km), instead of a fixed 440 m. It never appears before the matched legacy lane section supports the recommendation.
+- **Independent GPS confidence:** lane guidance no longer depends on legal speed-limit detection state. It needs two consecutive reliable fixes, with a minimum confirmation period, and rejects heading disagreement, doubtful route matches and ambiguous nearby branches.
+- **Short GPS grace period:** a previously visible recommendation can remain during a brief accuracy dip, for up to about 3.6 seconds. A newly uncertain fix cannot reveal a lane recommendation; confirmed route deviations hide it immediately.
+- **Earlier Normal-mode voice cue:** when the verified lane layout and speed warrant it, a preparation message may speak about 38 seconds before the maneuver. The normal turn preparation and action reminders remain; lane wording is not repeated if already announced. Only Alerts and Off remain unchanged.
+- **Same interface, no extra controls:** existing lane arrows and Liquid Glass styling are unchanged. Lane guidance is still strictly dependent on TomTom legacy API coverage and agreement with the current Orbis route; no guessed lane positions.
+
+Real-world junction coverage and iOS audio timing require on-device testing. Follow actual signs and lane markings.

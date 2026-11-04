@@ -2245,6 +2245,9 @@ const navigation = {
   speedLimitEligible:false, speedLimitWarningCount:0, speedLimitWarning:false,
   speedLimitState:null, speedLimitWarningSince:0, speedLimitClearCount:0,
   laneSections:[], laneController:null,
+  // Independent confidence for lane advice. Legal speed-limit confirmation is
+  // intentionally NOT a prerequisite for recommending provider-verified lanes.
+  laneFix:null,
   lastAlert:''
 };
 const navStartButton=$('navStart');
@@ -3268,14 +3271,95 @@ function refreshSecondaryNavigationTurn(route,current,distanceToCurrent){
 // advise lanes after independent geometry, heading and maneuver checks.
 // In Malaysia, coverage and key entitlements vary. Missing data => no UI.
 const MYARAH_LEGACY_LANES_ENDPOINT='https://api.tomtom.com/routing/1/calculateRoute/';
-const NAV_LANE_DISPLAY_M=440;
+// At highway speed, 440 metres is not enough time to prepare safely. These
+// windows scale with speed, but are also capped to the provider's mapped lane
+// section: a lane recommendation must never be projected onto an earlier road.
+const NAV_LANE_MAX_DISPLAY_M=1250;
 const NAV_LANE_ACCURACY_M=35;
+const NAV_LANE_FIX_GRACE_MS=3600;
+const NAV_LANE_FIX_STALE_MS=8500;
+function laneApproachDistance(speed){
+  const v=Number.isFinite(speed) && speed>=0 ? Math.min(42,speed):9;
+  return Math.max(260,Math.min(NAV_LANE_MAX_DISPLAY_M,v*43+80));
+}
+function laneSpeechApproachDistance(speed){
+  const v=Number.isFinite(speed) && speed>=0 ? Math.min(42,speed):9;
+  return Math.max(220,Math.min(1100,v*38+65));
+}
+function resetLaneFix(){
+  navigation.laneFix={firstGoodAt:0,lastReliableAt:0,lastObservedAt:0,
+    lastRouteOffset:null,goodCount:0,quality:'unknown',displayedOffset:null};
+}
+function laneBranchAmbiguous(index,point,match,accuracy,course,speed){
+  if(!index?.segments?.length || !point?.every?.(Number.isFinite) ||
+     !Number.isFinite(match?.along))return true;
+  const radius=Math.min(29,Math.max(12,accuracy*.9+8));
+  const cos=Math.max(.15,Math.cos(point[1]*Math.PI/180));
+  for(const s of index.segments){
+    // Adjacent geometry around one junction is not a second carriageway.
+    if(match.along>=s.start-25 && match.along<=s.start+s.length+25)continue;
+    if(Math.abs((s.start+s.length*.5)-match.along)<Math.max(62,accuracy*2+30))continue;
+    const ax=(s.a[0]-point[0])*111320*cos, ay=(s.a[1]-point[1])*110540;
+    const bx=(s.b[0]-point[0])*111320*cos, by=(s.b[1]-point[1])*110540;
+    const dx=bx-ax,dy=by-ay, len=dx*dx+dy*dy;
+    if(len<.001)continue;
+    const t=Math.max(0,Math.min(1,-(ax*dx+ay*dy)/len));
+    if(Math.hypot(ax+t*dx,ay+t*dy)>radius)continue;
+    // A strong, moving GPS course can disambiguate opposite-direction roads.
+    if(Number.isFinite(course) && Number.isFinite(speed) && speed>=4.5 &&
+       accuracy<=22 && Math.abs(smallestAngle(course-s.bearing))>65)continue;
+    return true;
+  }
+  return false;
+}
+function observeLaneGpsFix(match,point,accuracy,speed,course,now=Date.now()){
+  if(!navigation.laneFix)resetLaneFix();
+  const state=navigation.laneFix;
+  const wrongDirection=Number.isFinite(course) && Number.isFinite(speed) &&
+    speed>=4.5 && accuracy<=35 && Number.isFinite(match?.bearing) &&
+    Math.abs(smallestAngle(course-match.bearing))>58;
+  const hardFailure=!navigation.active || navigation.offRoute ||
+    navigation.joiningRoute || navigation.rerouting || !match?.valid ||
+    !Number.isFinite(match?.along) || wrongDirection ||
+    (Number.isFinite(accuracy) && match?.nearestDistance>Math.max(45,accuracy*1.5+15));
+  if(hardFailure){resetLaneFix();hideNavLaneGuide();return false;}
+  const ambiguous=Number.isFinite(accuracy) && accuracy<=NAV_LANE_ACCURACY_M &&
+    laneBranchAmbiguous(navigation.routeIndex,point,match,accuracy,course,speed);
+  if(ambiguous){resetLaneFix();hideNavLaneGuide();return false;}
+  const reliable=Number.isFinite(accuracy) && accuracy<=NAV_LANE_ACCURACY_M &&
+    match.nearestDistance<=Math.min(24,Math.max(12,accuracy*.8+8));
+  if(!reliable){
+    // Brief accuracy loss can preserve ALREADY VISIBLE guidance, but cannot
+    // introduce a new recommendation or trigger spoken advice.
+    state.quality='soft';
+    return false;
+  }
+  const wasRecent=state.lastReliableAt && now-state.lastReliableAt<=NAV_LANE_FIX_STALE_MS;
+  const rawOffset=match.along/navigation.routeIndex.total*navigation.route.meters;
+  // A large GPS snap is not evidence of a different lane section.
+  const plausible=!(wasRecent && Number.isFinite(state.lastRouteOffset) &&
+    Math.abs(rawOffset-state.lastRouteOffset)>Math.max(90,(Number.isFinite(speed)?speed:18)*
+      ((now-state.lastReliableAt)/1000)*2+accuracy*2+35));
+  if(!plausible){resetLaneFix();hideNavLaneGuide();return false;}
+  if(!wasRecent){state.firstGoodAt=now;state.goodCount=1;}
+  else if(!state.lastObservedAt || now-state.lastObservedAt>=250)state.goodCount=Math.min(3,state.goodCount+1);
+  state.lastObservedAt=now;state.lastReliableAt=now;
+  state.lastRouteOffset=rawOffset;state.quality='reliable';
+  return state.goodCount>=2 && now-state.firstGoodAt>=650;
+}
+function refreshLaneStaleness(now=Date.now()){
+  const state=navigation.laneFix;
+  if(!state)return;
+  if(now-state.lastReliableAt>NAV_LANE_FIX_GRACE_MS &&
+     $('navLaneGuide') && !$('navLaneGuide').hidden)hideNavLaneGuide();
+}
 const NAV_LANE_TYPES=new Set([
   'STRAIGHT','SLIGHT_LEFT','LEFT','SHARP_LEFT','SLIGHT_RIGHT',
   'RIGHT','SHARP_RIGHT','LEFT_U_TURN','RIGHT_U_TURN'
 ]);
 function hideNavLaneGuide(){
   const row=$('navLaneGuide');if(row)row.hidden=true;
+  if(navigation.laneFix)navigation.laneFix.displayedOffset=null;
 }
 function laneActionGroup(code){
   const s=String(code||'').toUpperCase();
@@ -3373,16 +3457,25 @@ function laneDirectionSvg(code){
     default:return '<path d="M12 20V4"/><path d="m5 11 7-7 7 7"/>';
   }
 }
-function trustedLaneForManeuver(instruction,progress){
+function trustedLaneForManeuver(instruction,progress,{forSpeech=false,now=Date.now()}={}){
+  const state=navigation.laneFix;
   if(!instruction || !navigation.active || navigation.offRoute || navigation.joiningRoute ||
-     navigation.rerouting || !navigation.speedLimitEligible ||
-     !Number.isFinite(navigation.lastAcceptedTime)||
-     !Number.isFinite(navigation.lastRawFix?.accuracy)||
-     navigation.lastRawFix.accuracy>NAV_LANE_ACCURACY_M||
-     Date.now()-navigation.lastAcceptedTime>12000)return null;
-  const distance=instruction.offset-progress;
-  if(distance<12 || distance>NAV_LANE_DISPLAY_M)return null;
-  return navigation.laneSections.find(s=>Math.abs(s.offset-instruction.offset)<1)||null;
+     navigation.rerouting || !state || state.goodCount<2 ||
+     now-state.lastReliableAt>NAV_LANE_FIX_GRACE_MS ||
+     now-state.firstGoodAt<650 || !navigation.route)return null;
+  const section=navigation.laneSections.find(s=>Math.abs(s.offset-instruction.offset)<1);
+  if(!section)return null;
+  const remaining=instruction.offset-progress;
+  const fixRemaining=instruction.offset-state.lastRouteOffset;
+  const earliestVerified=Math.max(0,instruction.offset-section.startOffset)+35;
+  const window=Math.min(laneApproachDistance(navigation.guidanceSpeed),earliestVerified);
+  if(remaining<15 || fixRemaining<15 || remaining>window || fixRemaining>window+45)return null;
+  const fresh=state.quality==='reliable' && now-state.lastReliableAt<=2300;
+  if(forSpeech && !fresh)return null;
+  // Only hold a previously displayed recommendation during a short soft GPS
+  // gap. Never reveal a new lane layout using stale or uncertain position.
+  if(!fresh && (state.quality!=='soft' || state.displayedOffset!==instruction.offset))return null;
+  return section;
 }
 function laneRecommendationText(lanes){
   const indices=lanes.map((l,i)=>l.follow?i:-1).filter(i=>i>=0);
@@ -3415,6 +3508,7 @@ function renderNavLaneGuide(instruction,progress){
   container.replaceChildren(fragment);
   label.textContent=laneRecommendationText(section.lanes);
   $('navLaneGuide').hidden=false;
+  if(navigation.laneFix)navigation.laneFix.displayedOffset=instruction.offset;
   return section;
 }
 async function requestVerifiedLaneSections(route){
@@ -3503,7 +3597,13 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
   // is never treated as spoken while voice is off or Web Speech is unavailable.
   if(navigation.voiceMode!=='normal' || navigation.offRoute || document.hidden)return;
   const windows=navigationCueDistances(speed);
-  const phase=distance<=windows.turn?'turn':distance<=windows.prepare?'prepare':null;
+  const verifiedLane=trustedLaneForManeuver(next,progress,{forSpeech:true});
+  const laneAdvice=verifiedLane?laneRecommendationText(verifiedLane.lanes):'';
+  const meaningfulLaneAdvice=/^Use (?:left|right|middle|\d+ (?:left|right)) lane/i.test(laneAdvice);
+  const advanceLane=meaningfulLaneAdvice && distance<=laneSpeechApproachDistance(speed) &&
+    distance>windows.prepare+55 && !navigation.spoken.has(`${index}-lane`);
+  const phase=distance<=windows.turn?'turn':distance<=windows.prepare?'prepare':
+    advanceLane?'lane':null;
   if(!phase)return;
   const key=`${index}-${phase}`;
   if(navigation.spoken.has(key))return;
@@ -3521,12 +3621,15 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
   let message=isArrivalInstruction(next)
     ? `Your destination is ${speechDistance(Math.max(10,distance))} ahead.`
     : spokenTurnInstruction(next,distance);
-  // Lane preparation is spoken ONLY when the provider's recommended lanes
-  // match this selected Orbis maneuver. Do not add a separate interruption.
-  const lane=phase==='prepare' ? trustedLaneForManeuver(next,progress):null;
-  if(lane){
-    const advice=laneRecommendationText(lane.lanes);
-    if(advice)message=advice+'. '+message;
+  // Lane preparation can lead the usual turn reminder at highway speeds.
+  // No extra repetition if the advance lane cue already began speaking.
+  if(phase==='lane'){
+    const laneWords=laneAdvice.replace(/^Use /,'use the ').toLowerCase();
+    const action=/^exitMotorway/i.test(next.maneuver)?'upcoming exit':'upcoming turn';
+    message=`In ${speechDistance(distance)}, prepare to ${laneWords} for the ${action}.`;
+  }else if(phase==='prepare' && meaningfulLaneAdvice &&
+           !navigation.spoken.has(`${index}-lane`)){
+    message=laneAdvice+'. '+message;
   }
   if(navigation.pendingGuidanceKey===key)return;
   const token=navigation.sessionToken;
@@ -3764,6 +3867,7 @@ function onNavigationLocation(position){
     announceNavVoiceAlert('off-route','You are off the route. Finding another way.');
   }
   $('navReroute').hidden=!navigation.offRoute;
+  observeLaneGpsFix(match,point,accuracy,speed,course,now);
   let display=point;
   let matchedDisplayAlong=null;
   let bearing=navigation.lastBearing;
@@ -3883,7 +3987,7 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   if(!navigation.active)return;
   navigation.active=false;
   navigation.laneController?.abort();navigation.laneController=null;
-  navigation.laneSections=[];hideNavLaneGuide();
+  navigation.laneSections=[];resetLaneFix();hideNavLaneGuide();
   clearNavigationArrowCourse();
   navigation.sessionToken+=1; // invalidate any in-flight route response
   if(navigation.rerouteController){
@@ -4000,7 +4104,7 @@ function startNavigation(){
     navigation.sessionToken+=1;
     navigation.laneSections=[];
     navigation.laneController?.abort();navigation.laneController=null;
-    hideNavLaneGuide();
+    resetLaneFix();hideNavLaneGuide();
     navigation.lastReroute=0;
     navigation.rerouting=false;
     resetJoinState(initial,point);
@@ -4019,6 +4123,7 @@ function startNavigation(){
     navigation.speedTimer=setInterval(()=>{
       if(navigation.active && !document.hidden){
         if(Date.now()-navigation.lastAcceptedTime>NAV_LIMIT_FIX_FRESH_MS)resetSpeedLimitTracking();
+        refreshLaneStaleness();
         renderNavSpeed();
       }
     },2000);
@@ -4116,7 +4221,7 @@ async function recalculateNavigation({automatic=false}={}){
     routeOptions=[route];routeSelected=0;
     routeOrigin={coords:origin,kind:'gps',label:'Current location'};
     navigation.route=route;navigation.routeIndex=index;
-    navigation.laneSections=[];hideNavLaneGuide();
+    navigation.laneSections=[];resetLaneFix();hideNavLaneGuide();
     navigation.lastProgress=0;navigation.turnIndex=-1;
     navigation.spoken.clear();navigation.alertSpoken.clear();
     navigation.pendingAlertKey=null;navigation.pendingGuidanceKey=null;
