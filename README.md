@@ -630,3 +630,14 @@ No private API keys are embedded. Navigation, glass controls and GPS remain unch
 - The alert is visual only (no extra spoken message). The red warning and limit disappear/clear for off-route, parking-lot joining, reroute, stale GPS, or unsupported road data. Rerouting resets the warning.
 - This is **informational, not a certified enforcement system**. Speed limits may be missing, time-dependent, temporarily changed, or incorrect. Obey actual road signs and local law; GPS speed is approximate.
 - Existing liquid-glass refraction, toll prices, navigation, automatic rerouting, landscape/portrait positions and voice modes are preserved. No new API key or external speed-limit service is required beyond the existing TomTom Routing API.
+
+
+## Speed-limit confidence refinement (November 2026)
+
+- Speed limits are now matched to the latest **raw GPS projection on the selected TomTom route**, rather than the deliberately trailing animated blue marker. This improves junction timing without changing navigation camera, marker animation, or route geometry.
+- The app leaves speed limits **unknown near section boundaries** using a speed/accuracy-dependent buffer. It waits for repeated consistent GPS matches before displaying a changed limit and won't warn against the previous road's limit during the transition.
+- Suppresses misleading readings when a different part of the selected route is plausibly near the GPS position (close parallel roads, U-turns, flyovers) or GPS course conflicts with the route direction. This is a conservative approximation, not lane-level map matching.
+- Red overspeed warning requires **two separate trusted over-limit readings spanning at least 850 ms**. A single spike cannot turn the dial red; two below-threshold readings clear it without flickering. GPS loss/off-route/rerouting makes the warning neutral.
+- There is no new panel, service, API key, or sound. Existing glass dial and limit badge stay in place. TomTom Orbis v3 `sections.speedLimit` support unchanged.
+- Speed limits may be missing, outdated, conditional, or incorrect. Follow posted signs and local laws. Test on a stationary simulator or as a passenger before relying on warnings.
+- Replace `app.js` and `index.html` in GitHub Pages; other files are unchanged except this README.

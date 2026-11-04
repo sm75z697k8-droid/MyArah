@@ -1892,17 +1892,58 @@ function normalizeRouteSpeedLimits(raw,coordinates){
 }
 // Suppress both sides of a speed-limit transition to avoid false warnings
 // from GPS jitter at junctions. Overlapping, disagreeing records are unknown.
-function speedLimitAtAlong(sections,along){
+function speedLimitAtAlong(sections,along,transitionMargin=7){
   if(!Array.isArray(sections) || !Number.isFinite(along))return null;
+  // Keep both sides of a change unknown until the GPS position is well inside
+  // one section. Unlike visual marker easing, this uses the RAW route match.
+  const margin=Math.max(7,Math.min(55,Number.isFinite(transitionMargin)?transitionMargin:7));
   const matches=sections.filter(section=>{
     if(!Number.isFinite(section.start) || !Number.isFinite(section.end) ||
        !Number.isFinite(section.kmh))return false;
-    const margin=Math.min(7,(section.end-section.start)*.20);
     return along>=section.start+margin && along<section.end-margin;
   });
   if(!matches.length)return null;
   const values=[...new Set(matches.map(section=>section.kmh))];
   return values.length===1?values[0]:null;
+}
+// The road-limit sign uses current GPS progress, not the separately smoothed
+// blue marker. At high speed or poor accuracy we wait farther beyond junctions.
+function speedLimitTransitionMargin(accuracy,speed){
+  const uncertainty=Number.isFinite(accuracy)?Math.max(0,accuracy):35;
+  const movement=Number.isFinite(speed)?Math.max(0,speed):0;
+  return Math.max(9,Math.min(55,uncertainty*1.05+movement*1.15+5));
+}
+// A nearby, materially different part of the selected route can look like the
+// same road to GPS (parallel carriageway, stacked flyover, tight U-turn).
+// If both are plausible but their speed limits differ, show unknown instead.
+function ambiguousNearbySpeedLimit(index,sections,point,match,accuracy,heading,speed){
+  if(!index?.segments?.length || !point?.every?.(Number.isFinite) ||
+     !Number.isFinite(match?.along) || !Number.isFinite(accuracy))return true;
+  const radius=Math.max(12,Math.min(35,accuracy*1.15+8));
+  const cos=Math.max(.15,Math.cos(point[1]*Math.PI/180));
+  const mainLimit=speedLimitAtAlong(sections,match.along,7);
+  for(const segment of index.segments){
+    const mid=segment.start+segment.length*.5;
+    // Adjacent pieces of the same intersection are handled by the transition
+    // guard; this check targets *separate* close sections of the route.
+    if(Math.abs(mid-match.along)<Math.max(55,accuracy*2+22))continue;
+    const ax=(segment.a[0]-point[0])*111320*cos;
+    const ay=(segment.a[1]-point[1])*110540;
+    const bx=(segment.b[0]-point[0])*111320*cos;
+    const by=(segment.b[1]-point[1])*110540;
+    const dx=bx-ax,dy=by-ay,len2=dx*dx+dy*dy;
+    if(len2<.001)continue;
+    const t=Math.max(0,Math.min(1,-(ax*dx+ay*dy)/len2));
+    if(Math.hypot(ax+t*dx,ay+t*dy)>radius)continue;
+    // GPS heading can sometimes rule out the other carriageway, but don't
+    // trust it while stopped or when horizontal accuracy is poor.
+    if(Number.isFinite(heading) && Number.isFinite(speed) &&
+       speed>=4.5 && accuracy<=22 &&
+       Math.abs(smallestAngle(heading-segment.bearing))>65)continue;
+    const candidateLimit=speedLimitAtAlong(sections,segment.start+segment.length*t,7);
+    if(candidateLimit!==mainLimit)return true;
+  }
+  return false;
 }
 
 function normalizeProviderRoutes(payload) {
@@ -2202,6 +2243,7 @@ const navigation = {
   speedometer:null, speedTimer:null,
   // Speed-limit warnings only use accurate matches onto this exact route.
   speedLimitEligible:false, speedLimitWarningCount:0, speedLimitWarning:false,
+  speedLimitState:null, speedLimitWarningSince:0, speedLimitClearCount:0,
   lastAlert:''
 };
 const navStartButton=$('navStart');
@@ -2218,13 +2260,67 @@ const NAV_LIMIT_WARN_BUFFER_KMH = 3;
 function currentRoadSpeedLimit(now=Date.now()) {
   if(!navigation.active || navigation.rerouting || navigation.offRoute ||
      navigation.joiningRoute || !navigation.speedLimitEligible ||
-     !navigation.route || !Number.isFinite(navigation.matchedAlong) ||
-     now-navigation.lastAcceptedTime>NAV_LIMIT_FIX_FRESH_MS)return null;
-  return speedLimitAtAlong(navigation.route.speedLimits,navigation.matchedAlong);
+     !navigation.route || now-navigation.lastAcceptedTime>NAV_LIMIT_FIX_FRESH_MS)return null;
+  const state=navigation.speedLimitState;
+  return state && Number.isFinite(state.confirmed) &&
+    now-state.confirmedAt<=NAV_LIMIT_FIX_FRESH_MS ? state.confirmed : null;
 }
 function resetSpeedLimitWarning(){
   navigation.speedLimitWarningCount=0;
+  navigation.speedLimitWarningSince=0;
+  navigation.speedLimitClearCount=0;
   navigation.speedLimitWarning=false;
+}
+function resetSpeedLimitTracking(){
+  navigation.speedLimitState={confirmed:null,confirmedAt:0,pending:null,
+    firstSeen:0,count:0,lastObservation:0,lastRawAlong:null};
+  navigation.speedLimitEligible=false;
+  resetSpeedLimitWarning();
+}
+function observeRoadSpeedLimit(rawAlong,point,match,accuracy,speed,heading,now=Date.now()){
+  let state=navigation.speedLimitState;
+  if(!state || (state.lastObservation>0 && now-state.lastObservation>NAV_LIMIT_FIX_FRESH_MS)){
+    resetSpeedLimitTracking();
+    state=navigation.speedLimitState;
+  }
+  if(!navigation.route || !navigation.routeIndex ||
+     !Number.isFinite(rawAlong) ||
+     ambiguousNearbySpeedLimit(navigation.routeIndex,navigation.route.speedLimits,
+       point,match,accuracy,heading,speed)){
+    resetSpeedLimitTracking();return null;
+  }
+  const margin=speedLimitTransitionMargin(accuracy,speed);
+  const observed=speedLimitAtAlong(navigation.route.speedLimits,rawAlong,margin);
+  if(observed===null){resetSpeedLimitTracking();return null;}
+  // If route matching jumps far ahead within one GPS interval, do not let a
+  // new road limit flash up. Recover on subsequent consistent GPS fixes.
+  if(Number.isFinite(state.lastRawAlong) && state.lastObservation>0){
+    const elapsed=(now-state.lastObservation)/1000;
+    if(elapsed>0 && elapsed<14){
+      const plausible=Math.max(65,(Number.isFinite(speed)?speed:20)*elapsed*1.7+accuracy*2+25);
+      if(Math.abs(rawAlong-state.lastRawAlong)>plausible){
+        resetSpeedLimitTracking();return null;
+      }
+    }
+  }
+  state.lastRawAlong=rawAlong;
+  state.lastObservation=now;
+  if(state.confirmed===observed){state.confirmedAt=now;return observed;}
+  // Remove the previous limit immediately after a suspected change. Never
+  // warn against an old road's limit while the new one is unconfirmed.
+  state.confirmed=null;
+  resetSpeedLimitWarning();
+  if(state.pending!==observed){
+    state.pending=observed;state.firstSeen=now;state.count=1;
+  }else{
+    state.count++;
+  }
+  if(state.count>=2 && now-state.firstSeen>=850){
+    state.confirmed=observed;state.confirmedAt=now;
+    state.pending=null;state.count=0;
+    return observed;
+  }
+  return null;
 }
 function updateSpeedLimitWarning(sampleAvailable,now=Date.now()){
   const limit=currentRoadSpeedLimit(now);
@@ -2234,15 +2330,26 @@ function updateSpeedLimitWarning(sampleAvailable,now=Date.now()){
   if(limit===null || !trusted){resetSpeedLimitWarning();return;}
   const kmh=speed*3.6;
   if(kmh>=limit+NAV_LIMIT_WARN_BUFFER_KMH){
-    navigation.speedLimitWarningCount=Math.min(3,navigation.speedLimitWarningCount+1);
-    if(navigation.speedLimitWarningCount>=2)navigation.speedLimitWarning=true;
+    navigation.speedLimitClearCount=0;
+    if(!navigation.speedLimitWarningCount)navigation.speedLimitWarningSince=now;
+    navigation.speedLimitWarningCount=Math.min(4,navigation.speedLimitWarningCount+1);
+    // A single noisy GPS sample cannot turn the glass red.
+    if(navigation.speedLimitWarningCount>=2 &&
+       now-navigation.speedLimitWarningSince>=850)navigation.speedLimitWarning=true;
   }else if(kmh<=limit+1){
-    resetSpeedLimitWarning();
-  }else{
-    // Hysteresis: don't flash red/normal around the threshold.
     navigation.speedLimitWarningCount=0;
+    navigation.speedLimitWarningSince=0;
+    navigation.speedLimitClearCount++;
+    // Clear quickly after a genuine slowdown but don't flicker for one sample.
+    if(navigation.speedLimitClearCount>=2)navigation.speedLimitWarning=false;
+  }else{
+    // Between thresholds: retain the current color instead of flashing.
+    navigation.speedLimitWarningCount=0;
+    navigation.speedLimitWarningSince=0;
+    navigation.speedLimitClearCount=0;
   }
 }
+
 function reliableNavSpeed(reported, inferred, accuracy, previousAccuracy, displacement, elapsed) {
   // iOS can report GPS speed even when horizontal position accuracy is more
   // than 45 metres. Don't discard that valid native measurement outright.
@@ -2293,8 +2400,7 @@ function renderNavSpeed(now=Date.now()) {
 }
 function resetNavSpeed(initialSpeed=null, accuracy=Infinity, now=Date.now()) {
   navigation.speedometer={filtered:null,trustedAt:0,lastSampleAt:0,displayed:undefined};
-  navigation.speedLimitEligible=false;
-  resetSpeedLimitWarning();
+  resetSpeedLimitTracking();
   if (Number.isFinite(initialSpeed) && initialSpeed>=0 && initialSpeed<=75 && accuracy<=NAV_FIX_MAX_ACCURACY_M) {
     navigation.speedometer.filtered=initialSpeed;
     navigation.speedometer.trustedAt=now;
@@ -3353,11 +3459,11 @@ function onNavigationLocation(position){
   const now=Date.now();
   const stamp=Number(position.timestamp)||now;
   if(now-stamp>NAV_FIX_MAX_AGE_MS || stamp>now+3000){
-    navigation.speedLimitEligible=false;resetSpeedLimitWarning();renderNavSpeed(now);
+    resetSpeedLimitTracking();renderNavSpeed(now);
     updateNavAlert('Waiting for a fresh GPS position…');return;
   }
   if(!Number.isFinite(accuracy) || accuracy>NAV_FIX_MAX_ACCURACY_M){
-    navigation.speedLimitEligible=false;resetSpeedLimitWarning();renderNavSpeed(now);
+    resetSpeedLimitTracking();renderNavSpeed(now);
     updateNavAlert('GPS signal weak — holding your last reliable position');return;
   }
   const previous=navigation.lastRawFix;
@@ -3387,7 +3493,7 @@ function onNavigationLocation(position){
   const match=matchGpsToRoute(navigation.routeIndex,point,{
     priorAlong:navigation.matchedAlong,elapsedSeconds:dt,accuracy,speed,heading:course
   });
-  if(!match){navigation.speedLimitEligible=false;resetSpeedLimitWarning();renderNavSpeed(now);return;}
+  if(!match){resetSpeedLimitTracking();renderNavSpeed(now);return;}
   navigation.lastRawFix={point:[...point],accuracy,speed,stamp};
   navigation.lastPosition=position;
   navigation.lastAcceptedTime=now;
@@ -3516,12 +3622,21 @@ function onNavigationLocation(position){
   }
   // Only warn about speeding on accurately matched road sections. The raw
   // off-route fix is never assigned the old route's legal limit.
+  // Use the latest RAW route match for legal speed-limit lookup. The marker's
+  // eased progress is intentionally delayed and can show a prior road at turns.
+  // Distinct nearby path branches and disagreeing travel course are treated as
+  // unknown, not as permission to warn using a possibly wrong road limit.
+  const courseConsistent=!(Number.isFinite(course) && Number.isFinite(speed) &&
+    speed>=4.5 && accuracy<=30 &&
+    Math.abs(smallestAngle(course-match.bearing))>60);
   navigation.speedLimitEligible=!!(matchedDisplayAlong!==null && clearlyOn &&
-    accuracy<=35 && match.nearestDistance<=25 && !navigation.rerouting &&
-    !navigation.offRoute && !navigation.joiningRoute);
+    match.valid && accuracy<=35 && match.nearestDistance<=25 &&
+    courseConsistent && !navigation.rerouting && !navigation.offRoute &&
+    !navigation.joiningRoute);
   if(!navigation.speedLimitEligible){
-    resetSpeedLimitWarning();
+    resetSpeedLimitTracking();
   }else{
+    observeRoadSpeedLimit(match.along,point,match,accuracy,speed,course,now);
     const state=navigation.speedometer;
     const sampleFresh=state && state.trustedAt===now;
     updateSpeedLimitWarning(!!sampleFresh,now);
@@ -3697,7 +3812,7 @@ function startNavigation(){
     if (navigation.speedTimer!==null) clearInterval(navigation.speedTimer);
     navigation.speedTimer=setInterval(()=>{
       if(navigation.active && !document.hidden){
-        if(Date.now()-navigation.lastAcceptedTime>NAV_LIMIT_FIX_FRESH_MS)resetSpeedLimitWarning();
+        if(Date.now()-navigation.lastAcceptedTime>NAV_LIMIT_FIX_FRESH_MS)resetSpeedLimitTracking();
         renderNavSpeed();
       }
     },2000);
@@ -3801,8 +3916,7 @@ async function recalculateNavigation({automatic=false}={}){
     navigation.matchedAlong=null;navigation.drawnAlong=null;
     navigation.offSince=0;navigation.onCount=0;navigation.arrivalCount=0;
     navigation.lastRawFix=null;
-    navigation.speedLimitEligible=false;
-    resetSpeedLimitWarning();
+    resetSpeedLimitTracking();
     renderNavSpeed();
     resetJoinState(newMatch,origin);
     initializeNavEta(route,0);
@@ -3974,6 +4088,7 @@ $('navSound').addEventListener('click',openVoiceMenu);
 document.addEventListener('visibilitychange',()=>{
   if(!navigation.active)return;
   if(document.hidden){
+    resetSpeedLimitTracking();
     // Invalidate in-flight requests too, so returning can request a fresh lock.
     navigationWakeGeneration += 1;
     navigationWakePending = null;
