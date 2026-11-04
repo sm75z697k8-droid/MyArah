@@ -743,3 +743,70 @@ Real-world junction coverage and iOS audio timing require on-device testing. Fol
 - A subtle overview widens the view and lowers pitch near **provider-supplied, useful TomTom maneuvers**, retaining a short after-turn grace period before returning to ordinary framing. Generic continue/arrival/toll instructions do not trigger the overview. The guidance banner and spoken instructions remain provider-driven and unchanged.
 - Landscape and portrait changes smoothly adjust framing without repeatedly triggering a new recenter flight. Start, explicit Recenter and foreground restoration retain their intentional one-time recenter animation.
 - Respects Reduce Motion, manual map gestures and foreground-only GPS restrictions. No iPhone drive test was performed; check smoothness and readability with a stationary passenger/tester, not by manipulating the phone while driving.
+
+## Natural English navigation voice — Azure + Cloudflare Worker (November 2026)
+
+MyArah now supports an **optional natural English neural voice**, defaulting to
+Microsoft's **English (UK) Sonia** (`en-GB-SoniaNeural`). The navigation modes
+**Normal / Only Alerts / Off** remain intact. Your iPhone's existing voice is
+used automatically if you haven't configured online audio, are offline, or the
+online speech request cannot play quickly enough.
+
+**Important:** This ZIP contains the implementation and setup instructions,
+**not a working Azure subscription or deployed voice server**. Voice playback
+will remain on the existing iPhone voice until you complete the steps below.
+Do not put an Azure API key into `app.js`, `index.html`, or the GitHub repository.
+
+### Set up entirely from your iPhone
+
+1. Create an [Azure Speech resource](https://portal.azure.com/) and find its
+   **resource region** and **key**. You are responsible for Azure usage/charges.
+2. On [Cloudflare](https://dash.cloudflare.com/), create a **Worker**, open its
+   code editor, and replace its script with the contents of
+   `cloudflare-worker/worker.js` from this ZIP. Deploy the Worker.
+3. In the Worker's **Settings → Variables and Secrets**, configure:
+   - `AZURE_SPEECH_KEY`: **Secret** containing your Azure Speech resource key.
+   - `AZURE_SPEECH_REGION`: plain variable with the actual region name, for
+     example `southeastasia` *only if that is your Azure resource region*.
+   - `ALLOWED_ORIGIN`: plain variable equal to the origin of your GitHub Pages
+     site, for example `https://YOURNAME.github.io` (without the repository path
+     or final slash). Use your custom domain origin if applicable.
+   - (Optional) `AZURE_VOICE_NAME`: `en-GB-SoniaNeural` (default),
+     `en-GB-RyanNeural`, or `en-US-JennyNeural`.
+4. Configure **Cloudflare rate limits / WAF**, review your Azure billing caps,
+   and ensure the endpoint is appropriate for your intended traffic. CORS is
+   browser isolation, *not* API authentication. Public callers can spoof an
+   Origin header; **rate limiting is essential for a public deployment**.
+5. In the existing MyArah navigation voice popup, expand **English voice**.
+   Paste the URL to your Worker, for example
+   `https://myarah-speech.YOUR-SUBDOMAIN.workers.dev/tts`, and tap
+   **Save & preview**. Only the Worker URL is stored in the iPhone's
+   local storage; the Azure API key is never requested by MyArah's web page.
+6. Start navigation with **Normal** enabled. Online English will play when
+   available. Use **Only Alerts** or **Off** as before. Select **Use iPhone
+   voice** at any time to disable the online service without losing its URL.
+
+### Design and limits
+
+- Voice synthesis receives **spoken navigation text** (which can contain street
+  or place names) through Cloudflare and Azure. The code does not send raw GPS
+  coordinates to the voice service. Evaluate your privacy expectations.
+- A single Web Audio voice channel prevents overlapping online and system
+  directions. The app starts/unlocks audio from a navigation or preview tap,
+  remembers up to 14 recent decoded phrases, and gives most online requests roughly
+  2.5 seconds (or 1.4 seconds for urgent turns) before falling back to the system voice. It cancels pending
+  audio on new important instructions, navigation end, or backgrounding.
+- Cached phrases might still be synthesized again after browser reload.
+  Cloudflare's optional edge cache can reuse identical speech strings.
+- Live internet access is required for uncached online phrases; iOS Safari
+  Web Audio behavior can differ between versions and must be tested on-device.
+- **Do not depend on any voice cue for driving safety**: follow road signs,
+  road markings and the visible map. Navigation does not operate reliably in
+  the background or with the iPhone screen locked.
+- If you update GitHub Pages, upload the four root files. The `cloudflare-worker`
+  directory is backend source code, not a separate dependency served by Pages.
+
+Official references: Microsoft Azure Speech REST API:
+https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech
+and Cloudflare Workers secrets:
+https://developers.cloudflare.com/workers/configuration/secrets/

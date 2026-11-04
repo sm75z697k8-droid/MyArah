@@ -2650,3 +2650,24 @@ body.dark .nav-lane-hint{color:#c0e2fa}
     max-width:395px;
   }
 }
+
+
+/* Natural English speech settings: inside the existing voice popover only. */
+#voiceMenu .myarah-english-voice-settings{margin-top:12px;padding:0 3px;border-top:1px solid rgba(99,139,178,.25);font-size:12px;}
+#voiceMenu .myarah-english-voice-settings summary{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:13px 2px 4px;cursor:pointer;color:#244c75;font-weight:750;}
+#voiceMenu .myarah-english-voice-settings summary strong{font-size:11px;font-weight:650;color:#53708b;text-align:right;}
+#voiceMenu .myarah-english-voice-settings p{margin:8px 0;color:#56728b;line-height:1.4;}
+#voiceMenu .myarah-english-voice-settings label{display:block;font-size:11px;font-weight:750;margin:10px 0 5px;color:#365f84;}
+#voiceMenu #englishVoiceUrl{width:100%;min-width:0;padding:11px 10px;border:1px solid rgba(92,137,175,.45);border-radius:10px;background:rgba(255,255,255,.88);color:#173b5a;font-size:12px;}
+#voiceMenu .myarah-english-voice-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px;}
+#voiceMenu .myarah-english-voice-actions button{min-height:38px;padding:8px;border:1px solid rgba(58,111,159,.4);border-radius:10px;background:rgba(242,249,255,.88);color:#21557e;font:inherit;font-weight:700;font-size:11px;touch-action:manipulation;}
+#voiceMenu .myarah-english-voice-actions button[aria-pressed="true"]{border-color:#287dc0;background:rgba(190,225,250,.85);}
+#voiceMenu #englishVoiceStatus{font-size:11px;min-height:20px;margin-bottom:0;}
+#voiceMenu #englishVoiceStatus[data-error="true"]{color:#a33f35;}
+body.dark #voiceMenu .myarah-english-voice-settings{border-color:rgba(153,195,228,.28);}
+body.dark #voiceMenu .myarah-english-voice-settings summary,body.dark #voiceMenu .myarah-english-voice-settings label{color:#e0f0ff;}
+body.dark #voiceMenu .myarah-english-voice-settings summary strong,body.dark #voiceMenu .myarah-english-voice-settings p{color:#afc9e1;}
+body.dark #voiceMenu #englishVoiceUrl{background:rgba(22,40,62,.94);border-color:rgba(146,190,222,.5);color:#f3faff;}
+body.dark #voiceMenu .myarah-english-voice-actions button{background:rgba(46,75,101,.85);color:#e6f3ff;border-color:rgba(150,191,223,.42);}
+body.dark #voiceMenu .myarah-english-voice-actions button[aria-pressed="true"]{background:#245b85;}
+body.dark #voiceMenu #englishVoiceStatus[data-error="true"]{color:#ffb1a6;}

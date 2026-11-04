@@ -11,8 +11,8 @@
   <title>MyArah — Explore Malaysia</title>
   <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=myarah-route-camera-refined-1">
-  <script type="module" src="app.js?v=nav-camera-stability-1"></script>
+  <link rel="stylesheet" href="styles.css?v=myarah-natural-english-1">
+  <script type="module" src="app.js?v=myarah-natural-english-1"></script>
 </head>
 <body>
   <main class="app" aria-label="MyArah map">
@@ -185,6 +185,17 @@
             <span class="myarah-voice-check" aria-hidden="true">✓</span>
           </button>
         </div>
+        <details id="englishVoiceSettings" class="myarah-english-voice-settings">
+          <summary><span>English voice</span><strong id="englishVoiceCurrent">iPhone voice</strong></summary>
+          <p>For a natural English voice, connect your secure Azure Speech Worker. Never enter an Azure API key here.</p>
+          <label for="englishVoiceUrl">Secure voice service URL</label>
+          <input id="englishVoiceUrl" type="url" autocomplete="url" autocapitalize="off" spellcheck="false" inputmode="url" placeholder="https://your-worker.workers.dev/tts" aria-describedby="englishVoiceStatus">
+          <div class="myarah-english-voice-actions">
+            <button type="button" id="englishVoiceOnline" aria-pressed="false">Save &amp; preview</button>
+            <button type="button" id="englishVoiceSystem" aria-pressed="true">Use iPhone voice</button>
+          </div>
+          <p id="englishVoiceStatus" role="status" aria-live="polite">The iPhone voice remains the fallback whenever online audio is unavailable.</p>
+        </details>
       </section>
     </div>
     <div class="toast" id="notice" role="status" aria-live="polite" hidden></div>

@@ -3261,8 +3261,8 @@ function followNavigationCamera(coords,bearing,force=false){
   scheduleNavigationCamera();
 }
 
-// Prefer natural voices *actually exposed* by iOS/Web Speech. Safari may
-// omit premium Siri and downloaded accessibility voices. No remote TTS key.
+// Prefer the best voices iOS exposes when the English online voice is not
+// configured or reachable. Keep this offline fallback for all guidance.
 function preferredNavigationVoice(){
   let voices=[];
   try{voices=window.speechSynthesis?.getVoices?.()||[];}catch(_){return null;}
@@ -3324,7 +3324,20 @@ function loadNavVoiceMode(){
 // calls the same engine synchronously during the user's touch event.
 let navigationSpeechActive=null;
 let navigationSpeechUnreliableVoice=null;
+// Online audio belongs to the same single-channel announcer as Web Speech.
+// On interruption, stop both engines so they cannot overlap a later turn.
+let navigationOnlineSpeech=null;
 function cancelNavigationSpeech(){
+  const online=navigationOnlineSpeech;
+  navigationOnlineSpeech=null;
+  if(online){
+    online.canceled=true;
+    try{online.controller?.abort();}catch(_){}
+    try{online.source?.stop();}catch(_){}
+    if(!online.started && typeof online.onFailure==='function'){
+      try{online.onFailure('interrupted');}catch(_){}
+    }
+  }
   const current=navigationSpeechActive;
   navigationSpeechActive=null;
   if(current?.watchdog!==null && current?.watchdog!==undefined)clearTimeout(current.watchdog);
@@ -3338,7 +3351,7 @@ function cancelNavigationSpeech(){
     if(synth && (current || synth.speaking || synth.pending))synth.cancel();
   }catch(_){}
 }
-function speakDirection(text,{
+function speakDirectionLocal(text,{
   interrupt=true,kind='guidance',allowInactive=false,onStart=null,onFailure=null
 }={}){
   if(!text || (!allowInactive && !navigation.active) || document.hidden ||
@@ -3421,6 +3434,186 @@ function speakDirection(text,{
   speakAttempt();
   return true;
 }
+// --- Natural English navigation voice (Azure through a protected Worker) ---
+// No Azure key belongs in this public GitHub Pages app. Only the HTTPS Worker
+// URL is stored locally, on this iPhone. System speech remains the fallback.
+const NAV_ENGLISH_VOICE_URL_KEY='myarahEnglishVoiceWorkerV1';
+const NAV_ENGLISH_VOICE_ENGINE_KEY='myarahEnglishVoiceEngineV1';
+const NAV_ENGLISH_VOICE_PREVIEW='In 300 metres, turn left.';
+const NAV_ENGLISH_CACHE_LIMIT=14;
+let englishVoiceEndpoint='';
+let englishVoiceEngine='system';
+let englishVoiceAudioContext=null;
+const englishVoiceAudioCache=new Map();
+function normalizeEnglishVoiceUrl(raw){
+  const url=new URL(String(raw||'').trim());
+  if(url.protocol!=='https:' || url.username || url.password ||
+     url.search || url.hash || !url.hostname || url.port)throw Error('Use a secure HTTPS Worker URL without a key or query.');
+  if(!url.pathname || url.pathname==='/')url.pathname='/tts';
+  if(url.pathname!=='/tts')throw Error('The Worker URL must end in /tts.');
+  return url.href;
+}
+function loadEnglishVoiceSettings(){
+  try{
+    const saved=localStorage.getItem(NAV_ENGLISH_VOICE_URL_KEY);
+    if(saved)englishVoiceEndpoint=normalizeEnglishVoiceUrl(saved);
+    englishVoiceEngine=localStorage.getItem(NAV_ENGLISH_VOICE_ENGINE_KEY)==='online'?'online':'system';
+  }catch(_){englishVoiceEndpoint='';englishVoiceEngine='system';}
+}
+loadEnglishVoiceSettings();
+function onlineEnglishVoiceReady(){
+  return englishVoiceEngine==='online' && !!englishVoiceEndpoint;
+}
+// iOS may reject delayed HTMLAudioElement.play() after a network fetch.
+// Unlock Web Audio directly in Start/Preview taps, then decode and schedule
+// online MP3 buffers on that existing audio context once they arrive.
+function unlockEnglishVoiceAudio(){
+  const Ctx=window.AudioContext||window.webkitAudioContext;
+  if(!Ctx)return null;
+  try{
+    if(!englishVoiceAudioContext)englishVoiceAudioContext=new Ctx();
+    if(englishVoiceAudioContext.state==='suspended'){
+      void englishVoiceAudioContext.resume().catch(()=>{});
+    }
+  }catch(_){return null;}
+  return englishVoiceAudioContext;
+}
+function rememberEnglishVoiceAudio(key,buffer){
+  englishVoiceAudioCache.delete(key);
+  englishVoiceAudioCache.set(key,buffer);
+  while(englishVoiceAudioCache.size>NAV_ENGLISH_CACHE_LIMIT){
+    englishVoiceAudioCache.delete(englishVoiceAudioCache.keys().next().value);
+  }
+}
+async function getEnglishVoiceAudio(text,endpoint,controller){
+  const key=endpoint+'\n'+text;
+  const cached=englishVoiceAudioCache.get(key);
+  if(cached){rememberEnglishVoiceAudio(key,cached);return cached;}
+  const response=await fetch(endpoint,{
+    method:'POST',mode:'cors',cache:'no-store',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({text}),signal:controller.signal
+  });
+  if(!response.ok)throw Error('Voice service unavailable ('+response.status+').');
+  const type=response.headers.get('Content-Type')||'';
+  if(!/^audio\/(?:mpeg|mp3)/i.test(type))throw Error('Voice server did not return MP3 audio.');
+  const bytes=await response.arrayBuffer();
+  if(bytes.byteLength<100 || bytes.byteLength>750000)throw Error('Invalid voice audio size.');
+  if(controller.signal.aborted)throw Error('Voice request canceled.');
+  const ctx=unlockEnglishVoiceAudio();
+  if(!ctx)throw Error('Audio engine unavailable.');
+  const buffer=await ctx.decodeAudioData(bytes);
+  if(controller.signal.aborted)throw Error('Voice request canceled.');
+  rememberEnglishVoiceAudio(key,buffer);
+  return buffer;
+}
+function speakDirectionOnline(text,{
+  interrupt=true,kind='guidance',allowInactive=false,onStart=null,onFailure=null,
+  preview=false,disableFallback=false,maxWaitMs=2500,stillRelevant=null
+}={}){
+  if(!text || document.hidden || (!preview && (
+      (!allowInactive && !navigation.active) || navigation.voiceMode==='off' ||
+      (kind==='guidance' && navigation.voiceMode!=='normal'))))return false;
+  if(!englishVoiceEndpoint || text.length>220 || navigator.onLine===false)return disableFallback?false:
+    speakDirectionLocal(text,{interrupt,kind,allowInactive,onStart,onFailure});
+  if(!interrupt && (navigationOnlineSpeech || navigationSpeechActive ||
+      window.speechSynthesis?.speaking || window.speechSynthesis?.pending))return false;
+  if(interrupt)cancelNavigationSpeech();
+  const ctx=unlockEnglishVoiceAudio();
+  if(!ctx)return disableFallback?false:
+    speakDirectionLocal(text,{interrupt,kind,allowInactive,onStart,onFailure});
+  const token=navigation.sessionToken;
+  const endpoint=englishVoiceEndpoint;
+  const request={controller:new AbortController(),source:null,started:false,
+    canceled:false,onFailure};
+  navigationOnlineSpeech=request;
+  const eligible=()=>navigationOnlineSpeech===request && !request.canceled &&
+    !document.hidden && (preview || (navigation.voiceMode!=='off' &&
+      (kind!=='guidance' || navigation.voiceMode==='normal') &&
+      (allowInactive || (navigation.active && navigation.sessionToken===token)))) &&
+    (typeof stillRelevant!=='function' || stillRelevant());
+  const fail=reason=>{
+    if(!eligible()){
+      if(navigationOnlineSpeech===request){navigationOnlineSpeech=null;onFailure?.('stale');}
+      return;
+    }
+    navigationOnlineSpeech=null;
+    if(disableFallback){if(typeof onFailure==='function')onFailure(reason);return;}
+    setEnglishVoiceStatus('Online voice unavailable — using iPhone voice.',true);
+    const accepted=speakDirectionLocal(text,{interrupt,kind,allowInactive,onStart,onFailure});
+    if(!accepted && typeof onFailure==='function')onFailure(reason);
+  };
+  const timeout=setTimeout(()=>request.controller.abort(),Math.max(800,Math.min(4000,maxWaitMs)));
+  (async()=>{
+    try{
+      const buffer=await getEnglishVoiceAudio(text,endpoint,request.controller);
+      clearTimeout(timeout);
+      if(!eligible()){
+        if(navigationOnlineSpeech===request){navigationOnlineSpeech=null;onFailure?.('stale');}
+        return;
+      }
+      if(ctx.state!=='running')await ctx.resume();
+      if(!eligible()){
+        if(navigationOnlineSpeech===request){navigationOnlineSpeech=null;onFailure?.('stale');}
+        return;
+      }
+      if(ctx.state!=='running')throw Error('Audio playback locked on this device.');
+      const source=ctx.createBufferSource();
+      request.source=source;
+      source.buffer=buffer;
+      source.connect(ctx.destination);
+      source.onended=()=>{
+        if(navigationOnlineSpeech===request)navigationOnlineSpeech=null;
+        try{source.disconnect();}catch(_){}
+      };
+      source.start(0);
+      request.started=true;
+      if(typeof onStart==='function')onStart();
+    }catch(error){clearTimeout(timeout);fail(error?.message||'online-unavailable');}
+  })();
+  return true;
+}
+// All existing callers continue to use the same onStart/onFailure contract.
+// Actual turn timing, lane advice, priority, alerts and Off mode do not change.
+function speakDirection(text,options={}){
+  if(onlineEnglishVoiceReady())return speakDirectionOnline(text,options);
+  return speakDirectionLocal(text,options);
+}
+function setEnglishVoiceStatus(message,isError=false){
+  const element=$('englishVoiceStatus');if(!element)return;
+  element.textContent=message;element.dataset.error=isError?'true':'false';
+}
+function refreshEnglishVoiceSettingsUI(){
+  const field=$('englishVoiceUrl');
+  if(field && document.activeElement!==field)field.value=englishVoiceEndpoint;
+  const label=$('englishVoiceCurrent');
+  if(label)label.textContent=onlineEnglishVoiceReady()?'Natural English · Online':'iPhone voice';
+  const online=$('englishVoiceOnline');
+  if(online)online.setAttribute('aria-pressed',String(onlineEnglishVoiceReady()));
+  const system=$('englishVoiceSystem');
+  if(system)system.setAttribute('aria-pressed',String(!onlineEnglishVoiceReady()));
+}
+function previewEnglishVoiceFromGesture(){
+  const field=$('englishVoiceUrl');
+  let url;
+  try{url=normalizeEnglishVoiceUrl(field?.value||englishVoiceEndpoint);}
+  catch(error){setEnglishVoiceStatus(error.message,true);return;}
+  englishVoiceEndpoint=url;
+  englishVoiceEngine='online';
+  try{
+    localStorage.setItem(NAV_ENGLISH_VOICE_URL_KEY,url);
+    localStorage.setItem(NAV_ENGLISH_VOICE_ENGINE_KEY,'online');
+  }catch(_){}
+  unlockEnglishVoiceAudio();
+  refreshEnglishVoiceSettingsUI();
+  setEnglishVoiceStatus('Connecting to the English voice service…');
+  const accepted=speakDirectionOnline(NAV_ENGLISH_VOICE_PREVIEW,{
+    kind:'alert',interrupt:true,allowInactive:true,preview:true,disableFallback:true,
+    onStart:()=>setEnglishVoiceStatus('Natural English preview playing. Online voice is selected.'),
+    onFailure:()=>setEnglishVoiceStatus('Could not play the online voice. Your iPhone voice will be used for directions.',true)
+  });
+  if(!accepted)setEnglishVoiceStatus('Online audio is not available. Your iPhone voice remains the fallback.',true);
+}
 function announceNavVoiceAlert(key,text,{interrupt=true}={}){
   if(!navigation.active || !text || navigation.alertSpoken.has(key) ||
       navigation.pendingAlertKey===key)return false;
@@ -3442,7 +3635,9 @@ function announceNavVoiceAlert(key,text,{interrupt=true}={}){
 function startNavigationVoiceFromGesture(){
   if(loadNavVoiceMode()==='off')return;
   setNavSoundState(loadNavVoiceMode());
-  speakDirection('Starting navigation.',{kind:'alert',allowInactive:true,interrupt:true});
+  if(onlineEnglishVoiceReady())unlockEnglishVoiceAudio();
+  // Immediate native confirmation also unlocks iOS speech if network audio fails.
+  speakDirectionLocal('Starting navigation.',{kind:'alert',allowInactive:true,interrupt:true});
 }
 function updateNavAlert(text){
   navAlert.hidden=!text;
@@ -3967,6 +4162,10 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
   const token=navigation.sessionToken;
   navigation.pendingGuidanceKey=key;
   const accepted=speakDirection(message,{interrupt,
+    maxWaitMs:phase==='turn'?1400:2300,
+    stillRelevant:()=>navigation.turnIndex===index && navigation.route===route &&
+      Number.isFinite(navigation.lastProgress) &&
+      navigation.lastProgress < next.offset+15,
     onStart:()=>{
       if(navigation.active && navigation.sessionToken===token){
         navigation.guidanceSpokenAt=Date.now();
@@ -4312,8 +4511,8 @@ function onNavigationLocation(position){
   if(navigation.arrivalCount>=2 && !navigation.announcedArrival){
     navigation.announcedArrival=true;
     const finishingWithVoice=navigation.voiceMode!=='off' && !document.hidden &&
-      'speechSynthesis' in window;
-    speakDirection('You have arrived at your destination.',{kind:'alert',interrupt:true});
+      (onlineEnglishVoiceReady() || 'speechSynthesis' in window);
+    speakDirection('You have arrived at your destination.',{kind:'alert',interrupt:true,allowInactive:true});
     endNavigation('Arrived at destination',{finishAnnouncement:finishingWithVoice});
     return;
   }
@@ -4725,6 +4924,7 @@ function openVoiceMenu(){
   // Do not animate from an unmeasured centered position. The same origin is
   // used every time, even after a map gesture expands the recenter dock.
   const wasHidden=voiceMenu.hidden;
+  refreshEnglishVoiceSettingsUI();
   voiceMenu.classList.remove('is-open');
   voiceMenu.hidden=false;
   $('navSound').setAttribute('aria-expanded','true');
@@ -4762,6 +4962,16 @@ voiceMenu.querySelectorAll('[data-voice-option]').forEach(option=>{
     closeVoiceMenu();
   });
 });
+$('englishVoiceOnline').addEventListener('click',previewEnglishVoiceFromGesture);
+$('englishVoiceSystem').addEventListener('click',()=>{
+  englishVoiceEngine='system';
+  try{localStorage.setItem(NAV_ENGLISH_VOICE_ENGINE_KEY,'system');}catch(_){}
+  cancelNavigationSpeech();
+  refreshEnglishVoiceSettingsUI();
+  setEnglishVoiceStatus('Using your iPhone voice, including without internet.');
+});
+$('englishVoiceSettings').addEventListener('toggle',queueVoiceMenuPosition);
+refreshEnglishVoiceSettingsUI();
 voiceMenu.addEventListener('keydown',event=>{
   if(event.key==='Escape'){
     event.preventDefault();closeVoiceMenu();return;
@@ -4799,6 +5009,7 @@ map.on('pitchstart',onManualNavigationMapGesture);
 $('navReroute').addEventListener('click',()=>void recalculateNavigation());
 $('navSound').addEventListener('click',openVoiceMenu);
 document.addEventListener('visibilitychange',()=>{
+  if(document.hidden && navigationOnlineSpeech)cancelNavigationSpeech();
   if(!navigation.active)return;
   if(document.hidden){
     resetSpeedLimitTracking();
