@@ -2136,7 +2136,7 @@ const navigation = {
   // The camera follows the marker's *displayed* position, not raw GPS jumps.
   cameraState:null, cameraFrame:0,
   follow:true, voiced:false, voiceMode:'normal', spoken:new Set(), turnIndex:-1,
-  alertSpoken:new Set(),
+  alertSpoken:new Set(),pendingAlertKey:null,pendingGuidanceKey:null,
   // Guidance announcements are relative to movement, not fixed road distances.
   // Keep timing state separate from GPS/map smoothing and reset it on reroute.
   guidanceSpeed:null, guidanceSpokenAt:0,
@@ -2734,9 +2734,9 @@ function preferredNavigationVoice(){
     const name=v.name||'';
     const rank=favourites.findIndex(candidate=>name.toLowerCase().includes(candidate));
     const locale=(v.lang||'').replace('_','-').toLowerCase();
-    return (quality.test(name)?70:0)+(rank<0?0:26-rank)+
+    return (quality.test(name)?42:0)+(rank<0?0:26-rank)+
       (locale==='en-my'?8:locale==='en-au'?7:locale==='en-gb'?6:3)+
-      (v.localService?3:0)+(v.default?2:0)-(novelty.test(name)?120:0);
+      (v.localService?32:0)+(v.default?12:0)-(novelty.test(name)?120:0);
   };
   return english.slice().sort((a,b)=>score(b)-score(a))[0];
 }
@@ -2776,33 +2776,131 @@ function loadNavVoiceMode(){
     return ['normal','alerts','off'].includes(saved)?saved:'normal';
   }catch(_){return 'normal';}
 }
-function speakDirection(text,{interrupt=true,kind='guidance'}={}){
-  if(!text || !navigation.active || document.hidden ||
+// iOS WebKit can silently ignore speech started only after an asynchronous GPS
+// callback. Keep an utterance alive until its events fire and confirm that it
+// ACTUALLY started before marking a turn/alert as spoken. The Start button
+// calls the same engine synchronously during the user's touch event.
+let navigationSpeechActive=null;
+let navigationSpeechUnreliableVoice=null;
+function cancelNavigationSpeech(){
+  const current=navigationSpeechActive;
+  navigationSpeechActive=null;
+  if(current?.watchdog!==null && current?.watchdog!==undefined)clearTimeout(current.watchdog);
+  if(current && !current.started && typeof current.onFailure==='function'){
+    try{current.onFailure('interrupted');}catch(_){}
+  }
+  // Avoid cancel() immediately before a new first utterance on iOS: even an
+  // idle cancellation can interfere with starting playback on some builds.
+  try{
+    const synth=window.speechSynthesis;
+    if(synth && (current || synth.speaking || synth.pending))synth.cancel();
+  }catch(_){}
+}
+function speakDirection(text,{
+  interrupt=true,kind='guidance',allowInactive=false,onStart=null,onFailure=null
+}={}){
+  if(!text || (!allowInactive && !navigation.active) || document.hidden ||
       navigation.voiceMode==='off' ||
       (kind==='guidance' && navigation.voiceMode!=='normal') ||
-      !('speechSynthesis' in window)) return false;
-  try {
-    const synth=window.speechSynthesis;
-    // Don't cut off a useful instruction for a non-urgent reminder.
-    if(synth.speaking && !interrupt)return false;
-    const utterance=new SpeechSynthesisUtterance(text);
-    const voice=preferredNavigationVoice();
-    if(voice)utterance.voice=voice;
-    utterance.lang=voice?.lang||'en-GB';
-    // Overly slow speech can sound stilted. Use a conversational pace.
-    utterance.rate=.98;
-    utterance.pitch=1.01;
-    utterance.volume=1.0;
-    if(interrupt)synth.cancel();
-    synth.speak(utterance);
-    return true;
-  }catch(_){return false;/* Safari may refuse or temporarily lack a voice. */}
+      !('speechSynthesis' in window) ||
+      typeof SpeechSynthesisUtterance!=='function')return false;
+  const synth=window.speechSynthesis;
+  if(!synth || (navigationSpeechActive && !interrupt))return false;
+  try{
+    if((synth.speaking || synth.pending) && !interrupt)return false;
+  }catch(_){return false;}
+  if(interrupt && (navigationSpeechActive || synth.speaking || synth.pending))cancelNavigationSpeech();
+  const initialToken=navigation.sessionToken;
+  const speakAttempt=(useDefaultVoice=false)=>{
+    if(document.hidden || navigation.voiceMode==='off' ||
+        (!allowInactive && (!navigation.active || navigation.sessionToken!==initialToken)))return;
+    let utterance;
+    try{
+      utterance=new SpeechSynthesisUtterance(text);
+      const chosen=useDefaultVoice?null:preferredNavigationVoice();
+      const voice=chosen?.name===navigationSpeechUnreliableVoice?null:chosen;
+      if(voice)utterance.voice=voice;
+      utterance.lang=voice?.lang||'en-GB';
+      utterance.rate=.98;
+      utterance.pitch=1.01;
+      utterance.volume=1;
+    }catch(_){if(onFailure)onFailure('setup');return;}
+    // Holding this reference avoids older Safari versions collecting the speech
+    // object while the system synthesizer is still working.
+    const request={utterance,started:false,watchdog:null,onFailure};
+    navigationSpeechActive=request;
+    const finish=()=>{
+      if(navigationSpeechActive!==request)return false;
+      if(request.watchdog!==null)clearTimeout(request.watchdog);
+      navigationSpeechActive=null;
+      return true;
+    };
+    const fail=reason=>{
+      if(!finish())return;
+      const mayRetry=!useDefaultVoice && !!utterance.voice &&
+        reason!=='canceled' && reason!=='interrupted' &&
+        !document.hidden && navigation.voiceMode!=='off' &&
+        (allowInactive || (navigation.active && navigation.sessionToken===initialToken));
+      if(mayRetry){
+        navigationSpeechUnreliableVoice=utterance.voice.name;
+        // Retry once using the iPhone's system default voice. Some exposed
+        // voices can be listed but not actually synthesize on that device.
+        try{synth.cancel();}catch(_){}
+        setTimeout(()=>speakAttempt(true),120);
+      }else if(typeof onFailure==='function')onFailure(reason);
+    };
+    utterance.onstart=()=>{
+      if(navigationSpeechActive!==request)return;
+      request.started=true;
+      if(request.watchdog!==null){clearTimeout(request.watchdog);request.watchdog=null;}
+      if(typeof onStart==='function')onStart();
+    };
+    utterance.onend=()=>{
+      const started=request.started;
+      if(finish() && !started && typeof onFailure==='function')onFailure('ended-without-start');
+    };
+    utterance.onerror=event=>{fail(event?.error||'error');};
+    try{
+      if(synth.paused)synth.resume();
+      // DO NOT cancel here unless an older utterance is still playing:
+      // cancelling and speaking back-to-back on iOS can drop the new speech.
+      synth.speak(utterance);
+    }catch(_){fail('exception');return;}
+    // Safari may silently drop speak(): a synchronous return is not evidence
+    // that audio started. Re-attempt a failed named voice only once.
+    if(!request.started && navigationSpeechActive===request){
+      request.watchdog=setTimeout(()=>{
+        if(navigationSpeechActive!==request || request.started)return;
+        if(synth.speaking)return; // engine may still be starting
+        fail('no-start');
+      },3200);
+    }
+  };
+  speakAttempt();
+  return true;
 }
 function announceNavVoiceAlert(key,text,{interrupt=true}={}){
-  if(!navigation.active || !text || navigation.alertSpoken.has(key))return false;
-  const said=speakDirection(text,{kind:'alert',interrupt});
-  if(said)navigation.alertSpoken.add(key);
-  return said;
+  if(!navigation.active || !text || navigation.alertSpoken.has(key) ||
+      navigation.pendingAlertKey===key)return false;
+  const token=navigation.sessionToken;
+  navigation.pendingAlertKey=key;
+  const accepted=speakDirection(text,{kind:'alert',interrupt,
+    onStart:()=>{
+      if(navigation.sessionToken===token && navigation.active)navigation.alertSpoken.add(key);
+      if(navigation.pendingAlertKey===key)navigation.pendingAlertKey=null;
+    },
+    onFailure:()=>{if(navigation.pendingAlertKey===key)navigation.pendingAlertKey=null;}
+  });
+  if(!accepted && navigation.pendingAlertKey===key)navigation.pendingAlertKey=null;
+  return accepted;
+}
+// Called DIRECTLY by the Start-navigation click, before GPS's async callback.
+// It produces a brief audible confirmation and unlocks Safari's speech session
+// for subsequent hands-free turn announcements. No extra button is needed.
+function startNavigationVoiceFromGesture(){
+  if(loadNavVoiceMode()==='off')return;
+  setNavSoundState(loadNavVoiceMode());
+  speakDirection('Starting navigation.',{kind:'alert',allowInactive:true,interrupt:true});
 }
 function updateNavAlert(text){
   navAlert.hidden=!text;
@@ -3023,10 +3121,21 @@ function refreshNavigationGuidance(progress,speed=navigation.guidanceSpeed){
   let message=isArrivalInstruction(next)
     ? `Your destination is ${speechDistance(Math.max(10,distance))} ahead.`
     : spokenTurnInstruction(next,distance);
-  if(!speakDirection(message,{interrupt}))return;
-  navigation.guidanceSpokenAt=now;
-  navigation.spoken.add(key);
-  if(phase==='turn')navigation.spoken.add(`${index}-prepare`);
+  if(navigation.pendingGuidanceKey===key)return;
+  const token=navigation.sessionToken;
+  navigation.pendingGuidanceKey=key;
+  const accepted=speakDirection(message,{interrupt,
+    onStart:()=>{
+      if(navigation.active && navigation.sessionToken===token){
+        navigation.guidanceSpokenAt=Date.now();
+        navigation.spoken.add(key);
+        if(phase==='turn')navigation.spoken.add(`${index}-prepare`);
+      }
+      if(navigation.pendingGuidanceKey===key)navigation.pendingGuidanceKey=null;
+    },
+    onFailure:()=>{if(navigation.pendingGuidanceKey===key)navigation.pendingGuidanceKey=null;}
+  });
+  if(!accepted && navigation.pendingGuidanceKey===key)navigation.pendingGuidanceKey=null;
 }
 // === MyArah ETA estimator: traffic-aware route baseline + cautious local pace ===
 // No background fetches and no extra UI. Live traffic is reflected in the
@@ -3361,13 +3470,14 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   cancelAnimationFrame(navigation.markerAnimation);
   navigation.markerAnimation=0;
   stopNavigationCamera();
-  if(!finishAnnouncement && 'speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
+  if(!finishAnnouncement)cancelNavigationSpeech();
   closeVoiceMenu({immediate:true,restoreFocus:false});
   navHud.hidden=true;navFooter.hidden=true;
   appRoot.classList.remove('navigation-active');
   setTollMarkerVisibility();
   navigation.follow=true;navigation.voiced=false;navigation.turnIndex=-1;
   navigation.alertSpoken.clear();
+  navigation.pendingAlertKey=null;navigation.pendingGuidanceKey=null;
   navigation.spoken.clear();navigation.guidanceSpeed=null;
   navigation.guidanceSpokenAt=0;
   navigation.offCount=0;navigation.offRoute=false;
@@ -3404,6 +3514,9 @@ function startNavigation(){
     prepareComparison();
     return;
   }
+  // iOS Safari requires speech to be started during a real user gesture.
+  // The GPS confirmation callback runs later, outside that gesture.
+  startNavigationVoiceFromGesture();
   // Start the screen wake request synchronously with the user's tap.
   void startNavigationWakeLock();
   // Confirm we are still near the route before enabling live turn directions.
@@ -3437,7 +3550,8 @@ function startNavigation(){
       lastProgress:Math.max(0,(matched?.along/index.total??snap.fraction)*route.meters),
       lastUpdate:Date.now(),lastCamera:0,lastBearing:null,follow:true,
       turnIndex:-1,offCount:0,offRoute:false,voiced:loadNavVoiceMode()!=='off',
-      voiceMode:loadNavVoiceMode(),alertSpoken:new Set(),announcedArrival:false,
+      voiceMode:loadNavVoiceMode(),alertSpoken:new Set(),
+      pendingAlertKey:null,pendingGuidanceKey:null,announcedArrival:false,
       guidanceSpeed:Number.isFinite(position.coords.speed) && position.coords.speed>=0 ?
         position.coords.speed:null,guidanceSpokenAt:0,
       markerPoint:displayed,drawnAlong:matched?.along??null,
@@ -3558,7 +3672,9 @@ async function recalculateNavigation({automatic=false}={}){
     routeOrigin={coords:origin,kind:'gps',label:'Current location'};
     navigation.route=route;navigation.routeIndex=index;
     navigation.lastProgress=0;navigation.turnIndex=-1;
-    navigation.spoken.clear();navigation.alertSpoken.clear();navigation.guidanceSpeed=null;
+    navigation.spoken.clear();navigation.alertSpoken.clear();
+    navigation.pendingAlertKey=null;navigation.pendingGuidanceKey=null;
+    navigation.guidanceSpeed=null;
     navigation.guidanceSpokenAt=0;
     navigation.offCount=0;navigation.offRoute=false;
     navigation.matchedAlong=null;navigation.drawnAlong=null;
@@ -3648,9 +3764,15 @@ function chooseNavVoiceMode(mode,{persist=true}={}){
   if(persist){try{localStorage.setItem(NAV_VOICE_MODE_KEY,mode);}catch(_){}}
   if(previous!==mode){
     navigation.spoken.clear();
+    navigation.pendingGuidanceKey=null;navigation.pendingAlertKey=null;
     navigation.guidanceSpokenAt=0;
-    if('speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
-    // Do not start speaking a stale instruction just because the menu closed.
+    cancelNavigationSpeech();
+  }
+  // This tap is also a speech-unlock gesture on iOS. A short confirmation
+  // verifies playback and avoids resuming an outdated maneuver announcement.
+  if(navigation.active && mode!=='off'){
+    speakDirection(mode==='alerts'?'Important alerts only.':'Voice guidance is on.',
+      {kind:'alert',interrupt:true});
   }
 }
 const voiceMenu=$('voiceMenu');
@@ -3735,7 +3857,8 @@ document.addEventListener('visibilitychange',()=>{
     const previous = navigationWakeLock;
     navigationWakeLock = null;
     if (previous && !previous.released) { try { void previous.release().catch(() => {}); } catch (_) {} }
-    if('speechSynthesis' in window)try{window.speechSynthesis.cancel();}catch(_){}
+    cancelNavigationSpeech();
+    navigation.pendingAlertKey=null;navigation.pendingGuidanceKey=null;
   }else{
     if (navigationWakeDesired) void requestNavigationWakeLock();
     updateNavAlert('Check your position and route after returning to MyArah.');

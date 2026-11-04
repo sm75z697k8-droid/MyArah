@@ -594,3 +594,12 @@ No private API keys are embedded. Navigation, glass controls and GPS remain unch
 - Icon: reused **Tabler Icons `navigation-filled`** from MyArah's existing map arrow, MIT License (see existing Tabler credit above). No external icon requests are made.
 
 **Update:** replace `index.html`, `styles.css`, and `app.js`; `README.md` is provided for completeness.
+
+
+## Voice playback reliability fix (iPhone Safari)
+- When the user taps **Start navigation**, MyArah immediately speaks a short **“Starting navigation”** confirmation within that user gesture, before the asynchronous GPS check. This initializes WebKit speech playback for later hands-free instructions.
+- Selecting **Normal** or **Only Alerts** also plays a short audible confirmation directly from the mode-selection tap. **Off** cancels speech immediately.
+- The active SpeechSynthesisUtterance is retained until playback ends; onstart/onerror are monitored. A speech request is only marked as delivered when its start event fires.
+- If a device advertises a preferred voice that fails to start, MyArah tries the system default English voice once. It does not silently switch voice modes, invent a voice service, or use a cloud TTS API.
+- Speech queues and pending flags are cleared on End, off-screen/app hiding and changing modes. Existing turn timing remains unchanged.
+- iOS can still block or mute playback; real hardware verification is necessary. Check iPhone media volume (not just ringer volume), and ensure Normal is selected if you expect spoken turns.
