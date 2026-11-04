@@ -11,8 +11,8 @@
   <title>MyArah — Explore Malaysia</title>
   <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=myarah-speed-limits-1">
-  <script type="module" src="app.js?v=myarah-speed-limit-accuracy-2"></script>
+  <link rel="stylesheet" href="styles.css?v=myarah-mac-voice-popover-1">
+  <script type="module" src="app.js?v=myarah-mac-voice-popover-1"></script>
 </head>
 <body>
   <main class="app" aria-label="MyArah map">
@@ -154,6 +154,7 @@
     </section>
     <div id="voiceMenu" class="myarah-voice-overlay" hidden>
       <div class="myarah-voice-scrim" data-voice-dismiss="true" aria-hidden="true"></div>
+      <span id="voiceMenuPointer" class="myarah-voice-pointer" aria-hidden="true"></span>
       <section id="voiceMenuDialog" class="myarah-voice-dialog" role="dialog" aria-modal="true" aria-labelledby="voiceMenuTitle" aria-describedby="voiceMenuSubtitle" tabindex="-1">
         <div class="myarah-voice-heading">
           <div><span class="myarah-voice-eyebrow">MYARAH NAVIGATION</span><h2 id="voiceMenuTitle">Voice guidance</h2></div>

@@ -2038,20 +2038,21 @@ body[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
    ================================================================ */
 #voiceMenu[hidden]{display:none!important;}
 #voiceMenu.myarah-voice-overlay{
-  position:absolute;inset:0;z-index:45;display:grid;place-items:center;
-  padding:calc(env(safe-area-inset-top) + 16px) calc(env(safe-area-inset-right) + 18px)
-    calc(env(safe-area-inset-bottom) + 16px) calc(env(safe-area-inset-left) + 18px);
-  isolation:isolate;pointer-events:auto;
+  position:absolute;inset:0;z-index:45;display:block;
+  padding:0;isolation:isolate;pointer-events:auto;
 }
 #voiceMenu .myarah-voice-scrim{
-  position:absolute;inset:0;background:rgba(12,25,39,.35);
-  -webkit-backdrop-filter:blur(5px) saturate(1.06);
-  backdrop-filter:blur(5px) saturate(1.06);
-  animation:myarahVoiceScrimIn 270ms ease-out both;
+  position:absolute;inset:0;background:rgba(12,25,39,.28);
+  -webkit-backdrop-filter:blur(4px) saturate(1.06);
+  backdrop-filter:blur(4px) saturate(1.06);
+  opacity:0;transition:opacity 190ms ease;
 }
+#voiceMenu.is-open .myarah-voice-scrim{opacity:1;}
 #voiceMenu .myarah-voice-dialog{
-  position:relative;z-index:1;width:min(100%,366px);max-height:100%;overflow:auto;
-  box-sizing:border-box;padding:18px;border-radius:28px;
+  position:absolute;left:0;top:0;z-index:2;
+  width:min(366px,calc(100% - 24px));
+  max-height:calc(100% - 24px);overflow-y:auto;overscroll-behavior:contain;
+  box-sizing:border-box;padding:18px;border-radius:24px;
   color:#20334b;
   background:radial-gradient(ellipse 92% 55% at 15% 0%,rgba(255,255,255,.98),transparent 95%),
     linear-gradient(150deg,rgba(251,254,255,.97),rgba(225,238,251,.95));
@@ -2060,8 +2061,43 @@ body[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
     inset -1px -1px 2px rgba(70,111,154,.13);
   -webkit-backdrop-filter:blur(28px) saturate(1.45);
   backdrop-filter:blur(28px) saturate(1.45);
-  transform-origin:center;
-  animation:myarahVoiceDialogIn 350ms cubic-bezier(.17,.86,.23,1.03) both;
+  transform-origin:var(--voice-origin-x,50%) 100%;
+  transform:translate3d(0,9px,0) scale(.965);
+  opacity:0;visibility:hidden;
+  transition:transform 260ms cubic-bezier(.18,.86,.24,1),opacity 175ms ease,
+    visibility 0s linear 260ms;
+}
+#voiceMenu[data-placement="below"] .myarah-voice-dialog{
+  transform-origin:var(--voice-origin-x,50%) 0%;
+  transform:translate3d(0,-9px,0) scale(.965);
+}
+#voiceMenu.is-open .myarah-voice-dialog{
+  transform:translate3d(0,0,0) scale(1);opacity:1;visibility:visible;
+  transition:transform 260ms cubic-bezier(.18,.86,.24,1),opacity 175ms ease,
+    visibility 0s;
+}
+/* macOS-style small pointer tied to the same measured speaker position. */
+#voiceMenu .myarah-voice-pointer{
+  position:absolute;z-index:3;width:13px;height:13px;
+  left:0;top:0;pointer-events:none;
+  background:#eaf3fc;
+  border-right:1.5px solid rgba(255,255,255,.98);
+  border-bottom:1.5px solid rgba(255,255,255,.98);
+  box-shadow:2px 2px 3px rgba(15,46,72,.06);
+  transform:rotate(45deg) scale(.8);opacity:0;
+  transition:transform 230ms cubic-bezier(.18,.86,.24,1),opacity 150ms ease;
+}
+#voiceMenu.is-open .myarah-voice-pointer{
+  transform:rotate(45deg) scale(1);opacity:1;
+}
+#voiceMenu[data-placement="below"] .myarah-voice-pointer{
+  background:#f6fbff;
+  border-right:0;border-bottom:0;
+  border-left:1.5px solid rgba(255,255,255,.98);
+  border-top:1.5px solid rgba(255,255,255,.98);
+}
+body.dark #voiceMenu .myarah-voice-pointer{
+  background:#1c3149;border-color:rgba(167,197,222,.55);
 }
 #voiceMenu .myarah-voice-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;}
 #voiceMenu .myarah-voice-eyebrow{font-size:10px;font-weight:820;letter-spacing:.14em;color:#3977a9;}
@@ -2101,18 +2137,7 @@ body[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
 #voiceMenu .myarah-voice-check{flex:0 0 22px;display:grid;place-items:center;font-size:16px;font-weight:900;color:#156bac;opacity:0;}
 #voiceMenu .myarah-voice-choice[aria-pressed="true"] .myarah-voice-check{opacity:1;}
 #voiceMenu button:focus-visible{outline:3px solid #1783d2;outline-offset:3px;}
-#voiceMenu.closing .myarah-voice-dialog{animation:myarahVoiceDialogOut 190ms ease-in both;}
-#voiceMenu.closing .myarah-voice-scrim{animation:myarahVoiceScrimOut 190ms ease-in both;}
-@keyframes myarahVoiceDialogIn{
-  from{opacity:.25;transform:translate3d(var(--voice-enter-x,0px),var(--voice-enter-y,80px),0) scale(.42);filter:blur(3px);}
-  to{opacity:1;transform:translate3d(0,0,0) scale(1);filter:blur(0);}
-}
-@keyframes myarahVoiceDialogOut{
-  from{opacity:1;transform:translate3d(0,0,0) scale(1);}
-  to{opacity:0;transform:translate3d(var(--voice-enter-x,0px),var(--voice-enter-y,80px),0) scale(.62);}
-}
-@keyframes myarahVoiceScrimIn{from{opacity:0}to{opacity:1}}
-@keyframes myarahVoiceScrimOut{from{opacity:1}to{opacity:0}}
+/* Opening and closing use one reversible transition, avoiding a second-open jump. */
 /* Dock icon modes: retain existing liquid glass and show only relevant SVG. */
 #navFooter #navSound .nav-voice-alert{display:none!important;}
 #navFooter #navSound[data-voice-mode="normal"] .nav-voice-playing{display:block!important;}
@@ -2143,7 +2168,7 @@ body.dark #voiceMenu .myarah-voice-choice-copy strong{color:#f0f7ff;}
 body.dark #voiceMenu .myarah-voice-choice-copy small{color:#c1d2e3;}
 body.dark #voiceMenu .myarah-voice-check{color:#9bd8ff;}
 @media(orientation:landscape) and (max-height:420px){
-  #voiceMenu .myarah-voice-dialog{width:min(100%,420px);padding:12px 15px;border-radius:20px;}
+  #voiceMenu .myarah-voice-dialog{width:min(420px,calc(100% - 24px));padding:12px 15px;border-radius:20px;}
   #voiceMenu .myarah-voice-subtitle{margin:3px 0 9px;}
   #voiceMenu .myarah-voice-options{gap:5px;}
   #voiceMenu .myarah-voice-choice{min-height:55px;padding:6px 10px;border-radius:12px;}
@@ -2152,8 +2177,9 @@ body.dark #voiceMenu .myarah-voice-check{color:#9bd8ff;}
 }
 @media(prefers-reduced-motion:reduce){
   #voiceMenu .myarah-voice-dialog,#voiceMenu .myarah-voice-scrim,
-  #voiceMenu.closing .myarah-voice-dialog,#voiceMenu.closing .myarah-voice-scrim{animation:none!important;}
-  #voiceMenu .myarah-voice-choice{transition:none!important;}
+  #voiceMenu .myarah-voice-pointer,#voiceMenu .myarah-voice-choice{
+    transition:none!important;
+  }
 }
 
 

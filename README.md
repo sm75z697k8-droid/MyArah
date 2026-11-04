@@ -641,3 +641,12 @@ No private API keys are embedded. Navigation, glass controls and GPS remain unch
 - There is no new panel, service, API key, or sound. Existing glass dial and limit badge stay in place. TomTom Orbis v3 `sections.speedLimit` support unchanged.
 - Speed limits may be missing, outdated, conditional, or incorrect. Follow posted signs and local laws. Test on a stationary simulator or as a passenger before relying on warnings.
 - Replace `app.js` and `index.html` in GitHub Pages; other files are unchanged except this README.
+
+
+## Voice guidance popover animation refinement
+
+- The voice menu now opens as a small, anchored macOS-style popover above the actual speaker button instead of animating a centered dialog by a separately measured offset.
+- Position is calculated before the opening transition, eliminating first-open and reopen origin jumps.
+- Reversible, subtle scale/fade motion with a small pointer; repositions on viewport/orientation changes while open.
+- All three voice modes, navigation audio, keyboard behavior, and light/dark glass styling remain unchanged.
+- Reduced Motion bypasses the movement animation.

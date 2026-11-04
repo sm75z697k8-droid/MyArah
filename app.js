@@ -4015,32 +4015,84 @@ function chooseNavVoiceMode(mode,{persist=true}={}){
 }
 const voiceMenu=$('voiceMenu');
 const voiceMenuDialog=$('voiceMenuDialog');
+const voiceMenuPointer=$('voiceMenuPointer');
 let voiceMenuCloseTimer=null;
+let voiceMenuLayoutFrame=0;
+// Position the popover using final layout sizes, *before* starting any
+// transition. Old CSS measured a centered, animating dialog, so reopening
+// could start at different screen coordinates when the dock moved.
+function positionVoiceMenu(){
+  if(voiceMenu.hidden)return;
+  const trigger=$('navSound').getBoundingClientRect();
+  const overlay=voiceMenu.getBoundingClientRect();
+  const width=voiceMenuDialog.offsetWidth;
+  const height=voiceMenuDialog.offsetHeight;
+  if(!width || !height || !overlay.width || !overlay.height)return;
+  const insetX=12,insetY=12,gap=13;
+  const clamp=(value,min,max)=>Math.min(Math.max(value,min),Math.max(min,max));
+  const cx=trigger.left+trigger.width/2-overlay.left;
+  const buttonTop=trigger.top-overlay.top;
+  const buttonBottom=trigger.bottom-overlay.top;
+  const left=clamp(cx-width/2,insetX,overlay.width-width-insetX);
+  const above=buttonTop-gap-height;
+  const below=buttonBottom+gap;
+  const fitsAbove=above>=insetY;
+  const fitsBelow=below+height<=overlay.height-insetY;
+  const placement=!fitsAbove && fitsBelow?'below':'above';
+  let top=placement==='below'?below:above;
+  top=clamp(top,insetY,overlay.height-height-insetY);
+  voiceMenu.dataset.placement=placement;
+  voiceMenuDialog.style.left=`${left}px`;
+  voiceMenuDialog.style.top=`${top}px`;
+  voiceMenuDialog.style.setProperty('--voice-origin-x',`${clamp(cx-left,16,width-16)}px`);
+  if(voiceMenuPointer){
+    voiceMenuPointer.style.left=`${clamp(cx-6.5,16,overlay.width-29)}px`;
+    voiceMenuPointer.style.top=`${placement==='below'?top-6.5:top+height-6.5}px`;
+  }
+}
+function queueVoiceMenuPosition(){
+  if(voiceMenu.hidden || voiceMenuLayoutFrame)return;
+  voiceMenuLayoutFrame=requestAnimationFrame(()=>{
+    voiceMenuLayoutFrame=0;
+    positionVoiceMenu();
+  });
+}
 function openVoiceMenu(){
   if(!navigation.active)return;
   if(voiceMenuCloseTimer!==null){clearTimeout(voiceMenuCloseTimer);voiceMenuCloseTimer=null;}
-  voiceMenu.classList.remove('closing');
+  if(voiceMenuLayoutFrame){cancelAnimationFrame(voiceMenuLayoutFrame);voiceMenuLayoutFrame=0;}
+  // Do not animate from an unmeasured centered position. The same origin is
+  // used every time, even after a map gesture expands the recenter dock.
+  const wasHidden=voiceMenu.hidden;
+  voiceMenu.classList.remove('is-open');
   voiceMenu.hidden=false;
   $('navSound').setAttribute('aria-expanded','true');
-  const trigger=$('navSound').getBoundingClientRect();
-  const modal=voiceMenuDialog.getBoundingClientRect();
-  voiceMenuDialog.style.setProperty('--voice-enter-x',`${(trigger.left+trigger.width/2)-(modal.left+modal.width/2)}px`);
-  voiceMenuDialog.style.setProperty('--voice-enter-y',`${(trigger.top+trigger.height/2)-(modal.top+modal.height/2)}px`);
+  positionVoiceMenu();
+  if(wasHidden){
+    void voiceMenuDialog.offsetWidth; // commit the initial anchored state
+  }
+  voiceMenu.classList.add('is-open');
   const current=voiceMenu.querySelector('[data-voice-option][aria-pressed="true"]');
   (current||voiceMenuDialog).focus({preventScroll:true});
 }
 function closeVoiceMenu({immediate=false,restoreFocus=true}={}){
   if(voiceMenuCloseTimer!==null){clearTimeout(voiceMenuCloseTimer);voiceMenuCloseTimer=null;}
+  if(voiceMenuLayoutFrame){cancelAnimationFrame(voiceMenuLayoutFrame);voiceMenuLayoutFrame=0;}
   if(voiceMenu.hidden)return;
   $('navSound').setAttribute('aria-expanded','false');
   const finish=()=>{
-    voiceMenu.classList.remove('closing');voiceMenu.hidden=true;
+    voiceMenu.classList.remove('is-open');
+    voiceMenu.hidden=true;
     if(restoreFocus && navigation.active)$('navSound').focus({preventScroll:true});
   };
   if(immediate || window.matchMedia('(prefers-reduced-motion: reduce)').matches){finish();return;}
-  voiceMenu.classList.add('closing');
-  voiceMenuCloseTimer=setTimeout(()=>{voiceMenuCloseTimer=null;finish();},190);
+  voiceMenu.classList.remove('is-open');
+  voiceMenuCloseTimer=setTimeout(()=>{voiceMenuCloseTimer=null;finish();},270);
 }
+window.addEventListener('resize',queueVoiceMenuPosition,{passive:true});
+window.addEventListener('orientationchange',queueVoiceMenuPosition,{passive:true});
+window.visualViewport?.addEventListener('resize',queueVoiceMenuPosition,{passive:true});
+window.visualViewport?.addEventListener('scroll',queueVoiceMenuPosition,{passive:true});
 $('voiceMenuClose').addEventListener('click',()=>closeVoiceMenu());
 voiceMenu.querySelector('[data-voice-dismiss]').addEventListener('click',()=>closeVoiceMenu());
 voiceMenu.querySelectorAll('[data-voice-option]').forEach(option=>{
