@@ -2366,3 +2366,68 @@ body.dark #navFooter .nav-footer-buttons #navFollow .nav-follow-filled {
     transition:none!important;
   }
 }
+
+
+/* =======================================================================
+   MyArah optical glass — softly frosted refraction (November 2026)
+   The real map-pixel refraction renderer remains enabled and unchanged.
+   Its per-lens canvas is lightly blurred and optically blended into a
+   brighter/darker translucent glass body. This masks the visible temporal
+   difference between map motion and ~20 Hz lens snapshots, without hiding
+   the glass texture, changing button positions, or increasing map readbacks.
+
+   Underlying icons, action colors and reflective rims retain their layers.
+   Traffic button and red End button intentionally remain unchanged.
+   ?glass=off still selects the existing lightweight, CSS-only alternative.
+   ======================================================================= */
+
+/* The extra translucency goes into the actual button material; no overlays
+   intercept touch and we don't add new DOM nodes, canvases or animations. */
+body[data-myarah-optical="on"] .map-controls .primary-control,
+body[data-myarah-optical="on"] .map-controls .text-control,
+body[data-myarah-optical="on"] #north.compass-control,
+body[data-myarah-optical="on"] #navFooter .nav-footer-buttons button:not(.nav-end),
+body[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
+  background:
+    radial-gradient(ellipse 90% 64% at 30% 3%,rgba(255,255,255,.76),transparent 90%),
+    linear-gradient(155deg,rgba(249,253,255,.70) 0%,rgba(226,241,253,.62) 55%,rgba(187,215,239,.53) 100%);
+  -webkit-backdrop-filter:blur(6px) saturate(1.2);
+  backdrop-filter:blur(6px) saturate(1.2);
+}
+body.dark[data-myarah-optical="on"] .map-controls .primary-control,
+body.dark[data-myarah-optical="on"] .map-controls .text-control,
+body.dark[data-myarah-optical="on"] #north.compass-control,
+body.dark[data-myarah-optical="on"] #navFooter .nav-footer-buttons button:not(.nav-end),
+body.dark[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
+  background:
+    radial-gradient(ellipse 88% 65% at 28% 4%,rgba(172,213,246,.30),transparent 91%),
+    linear-gradient(155deg,rgba(66,94,123,.78) 0%,rgba(39,64,89,.72) 60%,rgba(20,39,62,.73) 100%);
+}
+
+/* Refraction is still sampled and displaced from the live map. A small
+   1.4px frost diffusion and 54% optical blend disguise the stepped texture
+   without making the icon itself blurry or changing its hit target. */
+body[data-myarah-optical="on"] .myarah-optical-lens {
+  opacity:.54;
+  -webkit-filter:blur(1.4px) saturate(.91);
+  filter:blur(1.4px) saturate(.91);
+}
+
+/* In high-contrast accessibility mode the symbols should dominate. */
+@media (prefers-contrast: more) {
+  body[data-myarah-optical="on"] .myarah-optical-lens {opacity:.26;}
+  body[data-myarah-optical="on"] .map-controls .primary-control,
+  body[data-myarah-optical="on"] .map-controls .text-control,
+  body[data-myarah-optical="on"] #north.compass-control,
+  body[data-myarah-optical="on"] #navFooter .nav-footer-buttons button:not(.nav-end),
+  body[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
+    background:rgba(248,252,255,.92);
+  }
+  body.dark[data-myarah-optical="on"] .map-controls .primary-control,
+  body.dark[data-myarah-optical="on"] .map-controls .text-control,
+  body.dark[data-myarah-optical="on"] #north.compass-control,
+  body.dark[data-myarah-optical="on"] #navFooter .nav-footer-buttons button:not(.nav-end),
+  body.dark[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
+    background:rgba(27,47,69,.94);
+  }
+}

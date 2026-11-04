@@ -603,3 +603,12 @@ No private API keys are embedded. Navigation, glass controls and GPS remain unch
 - If a device advertises a preferred voice that fails to start, MyArah tries the system default English voice once. It does not silently switch voice modes, invent a voice service, or use a cloud TTS API.
 - Speech queues and pending flags are cleared on End, off-screen/app hiding and changing modes. Existing turn timing remains unchanged.
 - iOS can still block or mute playback; real hardware verification is necessary. Check iPhone media volume (not just ringer volume), and ensure Normal is selected if you expect spoken turns.
+
+
+## Frosted Refractive Liquid Glass — responsiveness refinement
+- The experimental live-map refraction stays active; it is **not replaced** by ordinary backdrop blur.
+- Existing lenses are blended at 54% opacity with a subtle 1.4px frosted diffusion and a translucent light/dark tint, which visually softens the lag of slower optical snapshots.
+- Kept lens sampling rate, MapLibre setup, optical warping, navigation, voice, routes, speedometer and controls **identical** to the uploaded build; only `styles.css` and the CSS cache version in `index.html` changed.
+- In accessibility high-contrast mode, the map-lens contribution is reduced further.
+- `?glass=off` still turns off map refraction and falls back to lightweight CSS glass.
+- Please test on an actual iPhone, watching clarity, battery use and whether the map behind controls appears smoother during rotation and zoom.
