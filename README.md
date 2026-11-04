@@ -733,3 +733,13 @@ Real-world junction coverage and iOS audio timing require on-device testing. Fol
 - No permanent glass refresh timer on a stationary map: MapLibre render/move/idle events trigger updates, plus a bounded window during button/layout transitions. The final map frame is retained.
 - Pauses any pending glass work when the page is backgrounded; refreshes after returning.
 - No new libraries, network requests, location polling, map rendering contexts or controls. This is a render-efficiency change, not a claim of measured iPhone battery savings. Test actual Safari smoothness and visual appearance on-device.
+
+
+## Navigation Camera Stability Refined (November 2026)
+- Keeps the existing MapLibre camera, marker/route geometry, TomTom Orbis instructions, GPS matching and controls. No new services, routes, permissions or buttons.
+- Camera-only speed filtering (~3.5-second response) and zoom/pitch deadbands reduce visible zoom hunting from small or noisy speed changes. Real changes in speed still gradually widen/narrow the driving view.
+- Conservative low-speed heading tolerance, capped rotation speed and a 4–9 metre stationary/weak-fix camera deadband reduce spinning and GPS drift at traffic lights and parking areas. This never changes the raw GPS position, speedometer, arrow position, legal speed limit or off-route/reroute decisions.
+- Smooth camera catch-up after larger accepted position changes avoids abrupt center jumps. The existing route-based location marker remains untouched; camera-only movement can briefly lag behind an abrupt GPS recovery.
+- A subtle overview widens the view and lowers pitch near **provider-supplied, useful TomTom maneuvers**, retaining a short after-turn grace period before returning to ordinary framing. Generic continue/arrival/toll instructions do not trigger the overview. The guidance banner and spoken instructions remain provider-driven and unchanged.
+- Landscape and portrait changes smoothly adjust framing without repeatedly triggering a new recenter flight. Start, explicit Recenter and foreground restoration retain their intentional one-time recenter animation.
+- Respects Reduce Motion, manual map gestures and foreground-only GPS restrictions. No iPhone drive test was performed; check smoothness and readability with a stationary passenger/tester, not by manipulating the phone while driving.

@@ -2458,7 +2458,7 @@ const navigation = {
   lastCoords:null, lastUpdate:0, lastCamera:0, lastProgress:0,
   lastBearing:null, markerAnimation:0, markerPoint:null,
   // The camera follows the marker's *displayed* position, not raw GPS jumps.
-  cameraState:null, cameraFrame:0,
+  cameraState:null, cameraFrame:0, cameraFix:null,
   follow:true, voiced:false, voiceMode:'normal', spoken:new Set(), turnIndex:-1,
   alertSpoken:new Set(),pendingAlertKey:null,pendingGuidanceKey:null,
   // Guidance announcements are relative to movement, not fixed road distances.
@@ -2969,10 +2969,13 @@ function stableRouteBearing(target,speed){
   if(!Number.isFinite(target)) return navigation.lastBearing;
   const last=navigation.lastBearing;
   if(!Number.isFinite(last)) return target;
-  // At walking/standing speeds, do not spin the camera based on GPS noise.
-  if(!Number.isFinite(speed) || speed<1.25) return last;
+  // Do not let route-matching noise rotate the map at traffic lights.
+  // At low driving speed require a meaningful change, while genuine corners
+  // remain responsive as speed increases (bearings wrap at 360 degrees).
+  if(!Number.isFinite(speed) || speed<2.0) return last;
   const delta=smallestAngle(target-last);
-  const weight=speed>7 ? .58 : .38;
+  if(speed<5 && Math.abs(delta)<5) return last;
+  const weight=speed>7 ? .58 : speed<4 ? .27 : .38;
   return normalizedHeading(last+delta*weight);
 }
 
@@ -3025,11 +3028,15 @@ function animateNavigationMarker(coords,along=null,elapsedMs=1000){
   navigation.markerAnimation=requestAnimationFrame(animate);
 }
 
-// Navigation camera refinement. All map movement still uses MapLibre's
-// existing camera API; no extra map layers, UI, services or route requests.
-const NAV_CAMERA_FRAME_MS=48; // cap navigation camera updates around 20fps on phones
+// Navigation camera stability refinement. This layer changes only how the
+// existing MapLibre camera follows already-accepted GPS and TomTom guidance.
+// It never changes route matching, ETA, rerouting, voice or marker coordinates.
+const NAV_CAMERA_FRAME_MS=48; // ~20fps upper bound for camera commands on iPhone
 const NAV_CAMERA_EASE_MS=640;
+const NAV_CAMERA_SPEED_TAU_MS=3500;
+const NAV_CAMERA_ZOOM_DEADBAND=.065;
 const navCameraClamp=(value,low,high)=>Math.max(low,Math.min(high,value));
+const navCameraSmoothstep=t=>{const x=navCameraClamp(t,0,1);return x*x*(3-2*x);};
 
 function navigationCameraFraming(){
   const appRect=appRoot.getBoundingClientRect();
@@ -3037,15 +3044,11 @@ function navigationCameraFraming(){
   const landscape=width>height && height<=560;
   let x=width/2, y=height*.65;
   if(landscape){
-    // The maneuver panel occupies the upper-left in landscape, while the
-    // circular driving controls occupy the lower center. Keep the GPS dot in
-    // the clear space on the right instead of underneath either panel.
+    // Keep the car out of the maneuver panel and bottom driving controls.
     const hudRight=!navHud.hidden ? navHud.getBoundingClientRect().right-appRect.left : width*.4;
     x=navCameraClamp(Math.max(width*.62,(hudRight+width)*.5),width*.54,width-64);
     y=navCameraClamp(height*.59,height*.44,Math.max(height*.44,height-124));
   }else{
-    // In portrait, put the blue dot below center, leaving useful road ahead
-    // between the instruction card and the location indicator.
     const hudBottom=!navHud.hidden ? navHud.getBoundingClientRect().bottom-appRect.top : height*.18;
     const footerTop=!navFooter.hidden ? navFooter.getBoundingClientRect().top-appRect.top : height*.82;
     const freeTop=navCameraClamp(hudBottom+12,0,height*.72);
@@ -3054,21 +3057,62 @@ function navigationCameraFraming(){
   }
   return {landscape, offset:[Math.round(x-width/2),Math.round(y-height/2)]};
 }
-function navigationCameraPerspective(landscape){
-  // Widen the driving view progressively with speed. Unknown/parked speed
-  // stays closer and flatter; don't oscillate zoom from single noisy fixes.
-  const speed=Number.isFinite(navigation.guidanceSpeed) ? navigation.guidanceSpeed :
-    (Number.isFinite(navigation.lastRawFix?.speed) ? navigation.lastRawFix.speed : 4);
+function navigationCameraObservedSpeed(){
+  const fresh=Date.now()-navigation.lastAcceptedTime<12000;
+  if(fresh && Number.isFinite(navigation.guidanceSpeed))return Math.max(0,navigation.guidanceSpeed);
+  if(fresh && Number.isFinite(navigation.lastRawFix?.speed))return Math.max(0,navigation.lastRawFix.speed);
+  return null; // Don't interpret stale / missing GPS speed as a fresh acceleration.
+}
+function navigationCameraFilteredSpeed(observed,state,now){
+  if(!Number.isFinite(state.speed)){
+    state.speed=Number.isFinite(observed)?navCameraClamp(observed,0,42):4;
+    state.lastSpeedTime=now;
+    return state.speed;
+  }
+  const elapsed=state.lastSpeedTime ? navCameraClamp(now-state.lastSpeedTime,0,9000):0;
+  state.lastSpeedTime=now;
+  if(!Number.isFinite(observed))return state.speed;
+  const candidate=navCameraClamp(observed,0,42);
+  // +/- 1.0m/s (~3.6km/h) is not a meaningful zoom change. EMA also
+  // suppresses larger one-off speed spikes while responding to acceleration.
+  if(Math.abs(candidate-state.speed)<=1)return state.speed;
+  const weight=1-Math.exp(-elapsed/NAV_CAMERA_SPEED_TAU_MS);
+  state.speed+=navCameraClamp(candidate-state.speed,-14,14)*weight;
+  return state.speed;
+}
+function navigationCameraJunctionAmount(route,progress,speed){
+  if(!route || !Number.isFinite(progress) || progress<0)return 0;
+  // Use provider-supplied maneuver offsets, not inferred polyline bends.
+  // Do not trigger overview for tollgates, generic continue or arrivals.
+  const maneuvers=navGuidanceInstructions(route).filter(isUsefulNextTurn);
+  const before=navCameraClamp(115+Math.max(0,speed)*9,150,435);
+  const after=navCameraClamp(55+Math.max(0,speed)*1.5,55,105);
+  let amount=0;
+  for(const maneuver of maneuvers){
+    const difference=maneuver.offset-progress;
+    if(difference>before)continue;
+    if(difference< -after)continue;
+    const proximity=difference>=0 ? navCameraSmoothstep(1-difference/before) :
+      navCameraSmoothstep(1-(-difference)/after)*.82;
+    amount=Math.max(amount,proximity);
+    if(amount>=.999)break;
+  }
+  return amount;
+}
+function navigationCameraPerspective(landscape,speed,junctionAmount=0){
+  // Wide stable view on highways. The maneuver overview gently widens the
+  // view and reduces pitch; after the turn it naturally returns to normal.
   const moving=navCameraClamp((speed-2)/25,0,1);
   return {
-    zoom:(landscape?16.65:16.85)-(landscape?.75:.72)*moving,
-    pitch:(landscape?45:49)+(landscape?3:5)*moving
+    zoom:(landscape?16.65:16.85)-(landscape?.75:.72)*moving-.26*junctionAmount,
+    pitch:(landscape?45:49)+(landscape?3:5)*moving-3.5*junctionAmount
   };
 }
 function stopNavigationCamera(){
   if(navigation.cameraFrame)cancelAnimationFrame(navigation.cameraFrame);
   navigation.cameraFrame=0;
   navigation.cameraState=null;
+  navigation.cameraFix=null;
 }
 function navigationCameraTick(time){
   navigation.cameraFrame=0;
@@ -3079,11 +3123,16 @@ function navigationCameraTick(time){
     return;
   }
   if(state.syncAfterEase){
-    // The initial recenter animation finishes before live tracking starts.
+    // Continue at the camera's final visual position; do not snap back after
+    // the one-time Start / Recenter ease.
     state.bearing=normalizedHeading(map.getBearing());
     state.zoom=map.getZoom();
     state.pitch=map.getPitch();
     state.offset=[...state.targetOffset];
+    // Use the point actually targeted by that flight. A new GPS fix might
+    // have arrived while it was easing; it must still be caught up smoothly.
+    state.lastPoint=state.easeAnchor?[...state.easeAnchor]:state.lastPoint;
+    state.easeAnchor=null;
     state.syncAfterEase=false;
     state.lastTime=0;
   }
@@ -3094,73 +3143,119 @@ function navigationCameraTick(time){
   const elapsed=state.lastTime ? navCameraClamp(time-state.lastTime,16,170) : NAV_CAMERA_FRAME_MS;
   state.lastTime=time;
   const ms=reducedMotion?1:elapsed;
-  const rotateBlend=reducedMotion?1:1-Math.exp(-ms/660);
-  const lensBlend=reducedMotion?1:1-Math.exp(-ms/1800);
-  const offsetBlend=reducedMotion?1:1-Math.exp(-ms/380);
-  state.bearing=normalizedHeading(state.bearing+
-    smallestAngle(state.targetBearing-state.bearing)*rotateBlend);
+  const rotateBlend=reducedMotion?1:1-Math.exp(-ms/630);
+  const lensBlend=reducedMotion?1:1-Math.exp(-ms/1950);
+  const offsetBlend=reducedMotion?1:1-Math.exp(-ms/470);
+  // Limit the angular rate, especially at junctions after noisy GPS fixes.
+  const pendingRotation=smallestAngle(state.targetBearing-state.bearing);
+  const maxDegreesPerSecond=state.speed<2.2?35:state.speed<8?105:150;
+  const rotationStep=reducedMotion?pendingRotation:navCameraClamp(
+    pendingRotation*rotateBlend,
+    -maxDegreesPerSecond*elapsed/1000,maxDegreesPerSecond*elapsed/1000);
+  state.bearing=normalizedHeading(state.bearing+rotationStep);
   state.zoom+=(state.targetZoom-state.zoom)*lensBlend;
   state.pitch+=(state.targetPitch-state.pitch)*lensBlend;
   state.offset=state.offset.map((value,i)=>value+(state.targetOffset[i]-value)*offsetBlend);
-  // Marker animation and camera now share the *same rendered location*.
+
   const marker=navigation.markerPoint;
-  const moved=marker && state.lastPoint ? haversineMeters(marker,state.lastPoint) : Infinity;
+  const previous=state.lastPoint;
+  const remaining=marker && previous ? haversineMeters(marker,previous):Infinity;
+  const fix=navigation.cameraFix;
+  const fixFresh=fix && Date.now()-fix.stamp<10000;
+  let positionDeadband=1;
+  if(fixFresh){
+    if(Number.isFinite(fix.speed) && fix.speed<1.6)positionDeadband=4;
+    if(fix.accuracy>35)positionDeadband=Math.max(positionDeadband,fix.matched?4:9);
+    if(!fix.matched && Number.isFinite(fix.speed) && fix.speed<2.5)
+      positionDeadband=Math.max(positionDeadband,7);
+  }
+  const tracking=!!marker && (!previous || remaining>positionDeadband);
+  let cameraPoint=previous;
+  if(tracking){
+    // Cap *camera* catch-up speed after a recovered GPS jump. The blue arrow
+    // stays at its original accurate marker location / route progress.
+    const maxStep=reducedMotion ? Infinity :
+      Math.max(14,(state.speed+12)*3.5)*elapsed/1000;
+    if(previous && remaining>maxStep){
+      const fraction=maxStep/remaining;
+      cameraPoint=[previous[0]+(marker[0]-previous[0])*fraction,
+        previous[1]+(marker[1]-previous[1])*fraction];
+    }else cameraPoint=marker;
+  }
   const rotating=Math.abs(smallestAngle(state.targetBearing-state.bearing));
   const settling=rotating>.7 || Math.abs(state.zoom-state.targetZoom)>.018 ||
     Math.abs(state.pitch-state.targetPitch)>.20 ||
     state.offset.some((value,i)=>Math.abs(value-state.targetOffset[i])>.8);
   const travelling=!!navigation.markerAnimation;
-  // Avoid repeatedly redrawing the map while parked or on noisy 1m fixes.
-  if(marker && (moved>1 || !state.lastPoint || settling || travelling)){
-    map.easeTo({
-      center:marker,
-      zoom:state.zoom,pitch:state.pitch,bearing:state.bearing,
-      offset:state.offset, duration:0,animate:false
-    });
-    state.lastPoint=[...marker];
+  // A marker easing within a few metres at a red light does not force map
+  // redraws. Lens/rotation/layout changes still render with a held center.
+  if(cameraPoint && (tracking || !previous || settling)){
+    map.easeTo({center:cameraPoint,zoom:state.zoom,pitch:state.pitch,
+      bearing:state.bearing,offset:state.offset,duration:0,animate:false});
+    state.lastPoint=[...cameraPoint];
   }
-  if(travelling || settling || moved>1){
+  if(travelling || settling || tracking){
     navigation.cameraFrame=requestAnimationFrame(navigationCameraTick);
   }
 }
 function scheduleNavigationCamera(){
-  if(!navigation.cameraFrame){
+  if(!navigation.cameraFrame)
     navigation.cameraFrame=requestAnimationFrame(navigationCameraTick);
-  }
 }
 function followNavigationCamera(coords,bearing,force=false){
   if(!navigation.follow || !navigation.active || document.hidden || !coords)return;
-  const {landscape,offset}=navigationCameraFraming();
-  const {zoom,pitch}=navigationCameraPerspective(landscape);
-  const angle=Number.isFinite(bearing) ? normalizedHeading(bearing) :
-    (navigation.cameraState?.targetBearing ?? navigation.lastBearing ?? map.getBearing());
   const now=performance.now();
+  const {landscape,offset}=navigationCameraFraming();
+  const angle=Number.isFinite(bearing)?normalizedHeading(bearing):
+    (navigation.cameraState?.targetBearing ?? navigation.lastBearing ?? map.getBearing());
   let state=navigation.cameraState;
   if(!state){
     state=navigation.cameraState={
       bearing:normalizedHeading(map.getBearing()),zoom:map.getZoom(),pitch:map.getPitch(),
       offset:[...offset],targetOffset:[...offset],targetBearing:angle,
-      targetZoom:zoom,targetPitch:pitch,holdUntil:0,syncAfterEase:false,
-      lastTime:0,lastPoint:null
+      targetZoom:map.getZoom(),targetPitch:map.getPitch(),holdUntil:0,
+      syncAfterEase:false,lastTime:0,lastPoint:null,easeAnchor:null,
+      speed:null,lastSpeedTime:0,landscape,size:null
     };
     force=true;
   }
+  const speed=navigationCameraFilteredSpeed(navigationCameraObservedSpeed(),state,now);
+  const reliableRoute=!!(navigation.routeIndex && !navigation.rerouting &&
+    !navigation.joiningRoute && !navigation.offRoute &&
+    Number.isFinite(navigation.matchedAlong));
+  const junction=reliableRoute ?
+    navigationCameraJunctionAmount(navigation.route,navigation.lastProgress,speed):0;
+  const {zoom,pitch}=navigationCameraPerspective(landscape,speed,junction);
   const rect=appRoot.getBoundingClientRect();
+  const landscapeChanged=state.landscape!==landscape;
+  state.landscape=landscape;
   state.size=[rect.width,rect.height];
-  state.targetBearing=angle;
-  state.targetZoom=zoom;
-  state.targetPitch=pitch;
+  const recentFix=navigation.cameraFix;
+  // Keep the current perspective while parked. A traffic light should not
+  // trigger a slow zoom-in solely because guidance speed is decaying to zero.
+  const parked=!force && !landscapeChanged && recentFix &&
+    Date.now()-recentFix.stamp<10000 && Number.isFinite(recentFix.speed) &&
+    recentFix.speed<1.1;
+  // Prevent minor course oscillations from driving the whole map around.
+  const angularDelta=Math.abs(smallestAngle(angle-state.targetBearing));
+  if(force || angularDelta>=(speed<3?6:2.3))state.targetBearing=angle;
+  // Zoom/pitch hysteresis avoids the 78 -> 82km/h zoom pulse.
+  if(!parked && (force || landscapeChanged ||
+      Math.abs(zoom-state.targetZoom)>=NAV_CAMERA_ZOOM_DEADBAND))
+    state.targetZoom=zoom;
+  if(!parked && (force || landscapeChanged || Math.abs(pitch-state.targetPitch)>=.55))
+    state.targetPitch=pitch;
   state.targetOffset=offset;
   navigation.lastCamera=now;
   navigation.lastCameraPoint=[...coords];
   navigation.lastCameraBearing=angle;
   if(force){
-    // On Start, Recenter or rotation, offer one calm transition into driving
-    // perspective. Subsequent GPS fixes never restart this animation.
     state.holdUntil=now+(reducedMotion?0:NAV_CAMERA_EASE_MS);
     state.syncAfterEase=true;
-    map.easeTo({center:navigation.markerPoint||coords,zoom,pitch,bearing:angle,
-      offset,duration:reducedMotion?0:NAV_CAMERA_EASE_MS,
+    state.easeAnchor=[...(navigation.markerPoint||coords)];
+    map.easeTo({center:state.easeAnchor,zoom:state.targetZoom,
+      pitch:state.targetPitch,bearing:state.targetBearing,offset,
+      duration:reducedMotion?0:NAV_CAMERA_EASE_MS,
       easing:cameraEase,essential:!reducedMotion});
   }
   scheduleNavigationCamera();
@@ -4184,6 +4279,12 @@ function onNavigationLocation(position){
     updateSpeedLimitWarning(!!sampleFresh,now);
   }
   renderNavSpeed(now);
+  // Camera confidence is independent of the GPS data used for routing,
+  // speed limits and off-route decisions. Weak/stationary fixes hold the
+  // visual center instead of pulling the map around the parked vehicle.
+  navigation.cameraFix={accuracy,speed,stamp:now,
+    matched:matchedDisplayAlong!==null && match.valid &&
+      !navigation.joiningRoute && !navigation.offRoute};
   // Confirm a missed turn with multiple accurate GPS fixes and actual motion.
   // Never start two routing requests from successive watchPosition callbacks.
   if(!document.hidden && shouldAutomaticallyReroute(navigation,point,accuracy,speed,now)){
@@ -4338,6 +4439,9 @@ function startNavigation(){
       lastRawFix:{point:[...point],accuracy:position.coords.accuracy,
         speed:position.coords.speed,stamp:Number(position.timestamp)||Date.now()},
       lastAcceptedTime:Date.now(),lastCameraPoint:null,lastCameraBearing:null,
+      cameraFix:{accuracy:Number(position.coords.accuracy),
+        speed:Number.isFinite(position.coords.speed)?position.coords.speed:null,
+        matched:!!matched,stamp:Date.now()},
       offSince:0,onCount:0,arrivalCount:0
     });
     navigation.sessionToken+=1;
@@ -4716,8 +4820,9 @@ document.addEventListener('visibilitychange',()=>{
     if(navigation.markerPoint)followNavigationCamera(navigation.markerPoint,navigation.lastBearing,true);
   }
 });
-// iOS may deliver a late orientation resize after the initial rotate event.
-// Refresh only the framing, not the route or destination, and only when Follow is on.
+// iOS may finish viewport resizing after the initial orientation event.
+// Recalculate the actual safe-area offset without restarting a 640ms recenter
+// flight or resetting heading/speed filters on every resize notification.
 let navigationCameraResizeTimer=null;
 function resyncNavigationCameraLayout(){
   if(navigationCameraResizeTimer!==null)clearTimeout(navigationCameraResizeTimer);
@@ -4725,7 +4830,7 @@ function resyncNavigationCameraLayout(){
     navigationCameraResizeTimer=null;
     if(navigation.active && navigation.follow && !document.hidden && navigation.markerPoint){
       map.resize();
-      followNavigationCamera(navigation.markerPoint,navigation.lastBearing,true);
+      followNavigationCamera(navigation.markerPoint,navigation.lastBearing);
     }
   },300);
 }
