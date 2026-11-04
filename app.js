@@ -1860,6 +1860,51 @@ function routeDistance(meters) {
   return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
 }
 
+// TomTom Orbis v3 uses path indices for *posted* speed-limit sections.
+// No road-type defaults: unknown limits must remain unknown, especially near
+// parallel Malaysian roads, roadworks and time-dependent restrictions.
+function normalizeRouteSpeedLimits(raw,coordinates){
+  const sections=raw?.sections?.speedLimit;
+  if(!Array.isArray(sections) || !Array.isArray(coordinates) || coordinates.length<2)return [];
+  const cumulative=[0];
+  for(let i=1;i<coordinates.length;i++){
+    const distance=haversineMeters(coordinates[i-1],coordinates[i]);
+    if(!Number.isFinite(distance))return [];
+    cumulative.push(cumulative[i-1]+distance);
+  }
+  const result=[];
+  for(const section of sections){
+    const first=section?.startPathIndex,last=section?.endPathIndex;
+    if(!Number.isInteger(first) || !Number.isInteger(last) || first<0 ||
+       last>=coordinates.length || first>=last)continue;
+    const values=(Array.isArray(section.speedRestrictions)?section.speedRestrictions:[])
+      .filter(restriction=>String(restriction?.type||'').toLowerCase()==='maximum')
+      .map(restriction=>restriction.inKilometersPerHour)
+      .filter(value=>Number.isInteger(value) && value>=10 && value<=150);
+    // Ambiguous maximum limits should not trigger a driver warning.
+    const unique=[...new Set(values)];
+    if(unique.length!==1)continue;
+    const start=cumulative[first],end=cumulative[last];
+    if(end-start<1)continue;
+    result.push({start,end,kmh:unique[0]});
+  }
+  return result.sort((a,b)=>a.start-b.start);
+}
+// Suppress both sides of a speed-limit transition to avoid false warnings
+// from GPS jitter at junctions. Overlapping, disagreeing records are unknown.
+function speedLimitAtAlong(sections,along){
+  if(!Array.isArray(sections) || !Number.isFinite(along))return null;
+  const matches=sections.filter(section=>{
+    if(!Number.isFinite(section.start) || !Number.isFinite(section.end) ||
+       !Number.isFinite(section.kmh))return false;
+    const margin=Math.min(7,(section.end-section.start)*.20);
+    return along>=section.start+margin && along<section.end-margin;
+  });
+  if(!matches.length)return null;
+  const values=[...new Set(matches.map(section=>section.kmh))];
+  return values.length===1?values[0]:null;
+}
+
 function normalizeProviderRoutes(payload) {
   if (!Array.isArray(payload?.routes)) return [];
   const options = payload.routes.map(raw => {
@@ -1889,6 +1934,7 @@ function normalizeProviderRoutes(payload) {
       delay: Number.isFinite(delay) && delay >= 0 ? delay : null,
       toll:tollPoints.length>0,
       tollPoints,
+      speedLimits:normalizeRouteSpeedLimits(raw,coords),
       arrival: summary.arrivalDateTime || null,
       instructions
     };
@@ -1996,7 +2042,7 @@ async function requestRouteComparison(origin) {
     };
     const response=await fetch(ROUTE_ENDPOINT,{
       method:'POST',
-      headers:{'Content-Type':'application/json','TomTom-Api-Key':trafficKey,'Accept-Language':'en-GB','Attributes':'routes'},
+      headers:{'Content-Type':'application/json','TomTom-Api-Key':trafficKey,'Accept-Language':'en-GB','Attributes':'routes,routes.sections.speedLimit'},
       body:JSON.stringify(requestBody),signal:controller.signal,cache:'no-store'
     });
     if (!response.ok) throw new Error(describeRouteError(response));
@@ -2154,6 +2200,8 @@ const navigation = {
   // Independent ETA state: only reliable on-route fixes update trip progress.
   eta:null, etaTimer:null,
   speedometer:null, speedTimer:null,
+  // Speed-limit warnings only use accurate matches onto this exact route.
+  speedLimitEligible:false, speedLimitWarningCount:0, speedLimitWarning:false,
   lastAlert:''
 };
 const navStartButton=$('navStart');
@@ -2165,6 +2213,36 @@ const navAlert=$('navAlert');
 // Inference is deliberately stricter than the speed used by navigation guidance:
 // a parked car must not appear to accelerate due to ordinary GPS drift.
 const NAV_SPEED_FRESH_MS = 18000;
+const NAV_LIMIT_FIX_FRESH_MS = 12000;
+const NAV_LIMIT_WARN_BUFFER_KMH = 3;
+function currentRoadSpeedLimit(now=Date.now()) {
+  if(!navigation.active || navigation.rerouting || navigation.offRoute ||
+     navigation.joiningRoute || !navigation.speedLimitEligible ||
+     !navigation.route || !Number.isFinite(navigation.matchedAlong) ||
+     now-navigation.lastAcceptedTime>NAV_LIMIT_FIX_FRESH_MS)return null;
+  return speedLimitAtAlong(navigation.route.speedLimits,navigation.matchedAlong);
+}
+function resetSpeedLimitWarning(){
+  navigation.speedLimitWarningCount=0;
+  navigation.speedLimitWarning=false;
+}
+function updateSpeedLimitWarning(sampleAvailable,now=Date.now()){
+  const limit=currentRoadSpeedLimit(now);
+  const speed=navigation.speedometer?.filtered;
+  const trusted=sampleAvailable && Number.isFinite(speed) &&
+    now-navigation.speedometer.trustedAt<=NAV_LIMIT_FIX_FRESH_MS;
+  if(limit===null || !trusted){resetSpeedLimitWarning();return;}
+  const kmh=speed*3.6;
+  if(kmh>=limit+NAV_LIMIT_WARN_BUFFER_KMH){
+    navigation.speedLimitWarningCount=Math.min(3,navigation.speedLimitWarningCount+1);
+    if(navigation.speedLimitWarningCount>=2)navigation.speedLimitWarning=true;
+  }else if(kmh<=limit+1){
+    resetSpeedLimitWarning();
+  }else{
+    // Hysteresis: don't flash red/normal around the threshold.
+    navigation.speedLimitWarningCount=0;
+  }
+}
 function reliableNavSpeed(reported, inferred, accuracy, previousAccuracy, displacement, elapsed) {
   // iOS can report GPS speed even when horizontal position accuracy is more
   // than 45 metres. Don't discard that valid native measurement outright.
@@ -2192,11 +2270,31 @@ function renderNavSpeed(now=Date.now()) {
     $('navSpeedValue').textContent=value===null ? '—' : String(value);
     state.displayed=value;
   }
+  const sign=$('navSpeedLimit');
+  const limit=currentRoadSpeedLimit(now);
+  if(sign){
+    sign.hidden=false;
+    sign.dataset.known=limit!==null?'true':'false';
+    const text=limit!==null?String(limit):'—';
+    if($('navSpeedLimitValue').textContent!==text)$('navSpeedLimitValue').textContent=text;
+    sign.setAttribute('aria-label',limit!==null?
+      `Mapped road speed limit ${limit} kilometres per hour`:'Road speed limit unavailable');
+    sign.title=limit!==null?`Mapped road limit: ${limit} km/h · obey road signs`:'Road speed limit unavailable';
+  }
+  // A stale GPS speed cannot trigger a red warning, even if the limit is known.
+  const warn=limit!==null && fresh && now-state.trustedAt<=NAV_LIMIT_FIX_FRESH_MS &&
+    navigation.speedLimitWarning;
+  gauge.dataset.overspeed=warn?'true':'false';
   gauge.dataset.available=fresh?'true':'false';
-  gauge.setAttribute('aria-label',fresh ? `Approximate GPS speed ${value} kilometres per hour` : 'GPS speed unavailable');
+  gauge.setAttribute('aria-label',fresh ?
+    `Approximate GPS speed ${value} kilometres per hour`+
+    (limit!==null?`, mapped speed limit ${limit}${warn?', above limit':''}`:'; road limit unknown') :
+    'GPS speed unavailable');
 }
 function resetNavSpeed(initialSpeed=null, accuracy=Infinity, now=Date.now()) {
   navigation.speedometer={filtered:null,trustedAt:0,lastSampleAt:0,displayed:undefined};
+  navigation.speedLimitEligible=false;
+  resetSpeedLimitWarning();
   if (Number.isFinite(initialSpeed) && initialSpeed>=0 && initialSpeed<=75 && accuracy<=NAV_FIX_MAX_ACCURACY_M) {
     navigation.speedometer.filtered=initialSpeed;
     navigation.speedometer.trustedAt=now;
@@ -2222,6 +2320,8 @@ function updateNavSpeed(reported, inferred, accuracy, previousAccuracy, displace
     }
     state.lastSampleAt=now;
     state.trustedAt=now;
+    // Eligibility is set after map matching. The current GPS fix can only
+    // update the warning once its route match has been confirmed below.
   }
   renderNavSpeed(now);
 }
@@ -3253,9 +3353,11 @@ function onNavigationLocation(position){
   const now=Date.now();
   const stamp=Number(position.timestamp)||now;
   if(now-stamp>NAV_FIX_MAX_AGE_MS || stamp>now+3000){
+    navigation.speedLimitEligible=false;resetSpeedLimitWarning();renderNavSpeed(now);
     updateNavAlert('Waiting for a fresh GPS position…');return;
   }
   if(!Number.isFinite(accuracy) || accuracy>NAV_FIX_MAX_ACCURACY_M){
+    navigation.speedLimitEligible=false;resetSpeedLimitWarning();renderNavSpeed(now);
     updateNavAlert('GPS signal weak — holding your last reliable position');return;
   }
   const previous=navigation.lastRawFix;
@@ -3285,7 +3387,7 @@ function onNavigationLocation(position){
   const match=matchGpsToRoute(navigation.routeIndex,point,{
     priorAlong:navigation.matchedAlong,elapsedSeconds:dt,accuracy,speed,heading:course
   });
-  if(!match)return;
+  if(!match){navigation.speedLimitEligible=false;resetSpeedLimitWarning();renderNavSpeed(now);return;}
   navigation.lastRawFix={point:[...point],accuracy,speed,stamp};
   navigation.lastPosition=position;
   navigation.lastAcceptedTime=now;
@@ -3412,6 +3514,19 @@ function onNavigationLocation(position){
     showProceedToRoute(match.nearestDistance);
     updateNavAlert('');
   }
+  // Only warn about speeding on accurately matched road sections. The raw
+  // off-route fix is never assigned the old route's legal limit.
+  navigation.speedLimitEligible=!!(matchedDisplayAlong!==null && clearlyOn &&
+    accuracy<=35 && match.nearestDistance<=25 && !navigation.rerouting &&
+    !navigation.offRoute && !navigation.joiningRoute);
+  if(!navigation.speedLimitEligible){
+    resetSpeedLimitWarning();
+  }else{
+    const state=navigation.speedometer;
+    const sampleFresh=state && state.trustedAt===now;
+    updateSpeedLimitWarning(!!sampleFresh,now);
+  }
+  renderNavSpeed(now);
   // Confirm a missed turn with multiple accurate GPS fixes and actual motion.
   // Never start two routing requests from successive watchPosition callbacks.
   if(!document.hidden && shouldAutomaticallyReroute(navigation,point,accuracy,speed,now)){
@@ -3466,7 +3581,10 @@ function endNavigation(message='Navigation ended',{finishAnnouncement=false}={})
   if(navigation.speedTimer!==null)clearInterval(navigation.speedTimer);
   navigation.speedTimer=null;
   navigation.speedometer=null;
+  navigation.speedLimitEligible=false;
+  resetSpeedLimitWarning();
   $('navSpeed').hidden=true;
+  const limitBadge=$('navSpeedLimit');if(limitBadge)limitBadge.hidden=true;
   cancelAnimationFrame(navigation.markerAnimation);
   navigation.markerAnimation=0;
   stopNavigationCamera();
@@ -3578,7 +3696,10 @@ function startNavigation(){
     resetNavSpeed(position.coords.speed,Number(position.coords.accuracy));
     if (navigation.speedTimer!==null) clearInterval(navigation.speedTimer);
     navigation.speedTimer=setInterval(()=>{
-      if(navigation.active && !document.hidden) renderNavSpeed();
+      if(navigation.active && !document.hidden){
+        if(Date.now()-navigation.lastAcceptedTime>NAV_LIMIT_FIX_FRESH_MS)resetSpeedLimitWarning();
+        renderNavSpeed();
+      }
     },2000);
     setNavFollowState(true);
     setNavSoundState(navigation.voiceMode);
@@ -3651,7 +3772,7 @@ async function recalculateNavigation({automatic=false}={}){
     };
     const response=await fetch(ROUTE_ENDPOINT,{
       method:'POST',cache:'no-store',signal:controller.signal,
-      headers:{'Content-Type':'application/json','TomTom-Api-Key':trafficKey,'Accept-Language':'en-GB','Attributes':'routes'},
+      headers:{'Content-Type':'application/json','TomTom-Api-Key':trafficKey,'Accept-Language':'en-GB','Attributes':'routes,routes.sections.speedLimit'},
       body:JSON.stringify(body)
     });
     if(!response.ok)throw new Error(describeRouteError(response));
@@ -3680,6 +3801,9 @@ async function recalculateNavigation({automatic=false}={}){
     navigation.matchedAlong=null;navigation.drawnAlong=null;
     navigation.offSince=0;navigation.onCount=0;navigation.arrivalCount=0;
     navigation.lastRawFix=null;
+    navigation.speedLimitEligible=false;
+    resetSpeedLimitWarning();
+    renderNavSpeed();
     resetJoinState(newMatch,origin);
     initializeNavEta(route,0);
     refreshNavTrip();

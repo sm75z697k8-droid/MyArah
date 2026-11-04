@@ -11,8 +11,8 @@
   <title>MyArah — Explore Malaysia</title>
   <link rel="preconnect" href="https://tiles.openfreemap.org">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=myarah-glossy-end-x-1">
-  <script type="module" src="app.js?v=myarah-voice-playback-fix-1"></script>
+  <link rel="stylesheet" href="styles.css?v=myarah-speed-limits-1">
+  <script type="module" src="app.js?v=myarah-speed-limits-1"></script>
 </head>
 <body>
   <main class="app" aria-label="MyArah map">
@@ -132,6 +132,13 @@
          aria-label="GPS speed unavailable" title="Approximate GPS speed, not a vehicle speedometer" hidden>
       <strong id="navSpeedValue" class="nav-speed-number" aria-hidden="true">—</strong>
       <span class="nav-speed-unit" aria-hidden="true">km/h</span>
+    </div>
+    <!-- Posted limit from the selected TomTom route. A dash means unknown.
+         Separate from the refractive gauge so the road-sign badge is not clipped. -->
+    <div id="navSpeedLimit" class="nav-speed-limit-sign" role="status" aria-live="off"
+         aria-label="Road speed limit unavailable" title="Road speed limit unavailable" hidden>
+      <span class="nav-speed-limit-caption" aria-hidden="true">LIMIT</span>
+      <strong id="navSpeedLimitValue" aria-hidden="true">—</strong>
     </div>
     <section id="navFooter" class="nav-footer surface" aria-label="Navigation controls" hidden>
       <div class="nav-trip-details">

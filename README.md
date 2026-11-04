@@ -620,3 +620,13 @@ No private API keys are embedded. Navigation, glass controls and GPS remain unch
 - Added a glossy red gradient, restrained highlight, fine red rim, and depth to match the supplied picture in both light and dark modes.
 - All other controls, refractive/frosted glass, voice playback, routing, toll rates and map behavior are unchanged.
 - For GitHub Pages, replace `index.html` and `styles.css` only. `app.js` remains byte-for-byte unchanged.
+
+
+## Road speed limits and speed warnings (November 2026)
+
+- **Source:** TomTom Orbis v3 Routing API `routes[].sections.speedLimit[]`; legal maximum in `speedRestrictions[].inKilometersPerHour` with `type: maximum`. The app requests this with its existing device-entered TomTom key (`Attributes: routes,routes.sections.speedLimit`).
+- While **navigation is active**, a small road-sign badge next to the glass GPS dial displays the speed limit for the confidently matched section of the selected route. A dash means *no usable limit / uncertain position*. No generic speed limit is invented from the road category.
+- The circular GPS speedometer turns red when filtered speed exceeds the known limit by **3 km/h or more in two successive trustworthy GPS readings**. It turns neutral when speed drops to within 1 km/h of the limit, avoiding constant flickering.
+- The alert is visual only (no extra spoken message). The red warning and limit disappear/clear for off-route, parking-lot joining, reroute, stale GPS, or unsupported road data. Rerouting resets the warning.
+- This is **informational, not a certified enforcement system**. Speed limits may be missing, time-dependent, temporarily changed, or incorrect. Obey actual road signs and local law; GPS speed is approximate.
+- Existing liquid-glass refraction, toll prices, navigation, automatic rerouting, landscape/portrait positions and voice modes are preserved. No new API key or external speed-limit service is required beyond the existing TomTom Routing API.

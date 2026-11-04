@@ -2484,3 +2484,97 @@ body.dark #navFooter .nav-footer-buttons #navEnd.nav-end::before {
   outline:3px solid #7ed3ff;
   outline-offset:3px;
 }
+
+
+/* === MyArah road speed limits (TomTom route-section data) ============
+   Keep the existing refractive gauge and layout, then add a separate small
+   posted-limit sign so its outline never gets clipped by the lens canvas.
+   Red is reserved for confirmed speeding, not for GPS or map uncertainty. */
+.app {
+  --nav-speed-gauge-left:max(16px,env(safe-area-inset-left));
+  --nav-speed-gauge-bottom:calc(env(safe-area-inset-bottom) + 162px);
+  --nav-speed-gauge-size:76px;
+}
+#navSpeed.nav-speed-gauge,
+body[data-myarah-optical="on"] #navSpeed.nav-speed-gauge {
+  position:absolute;
+  left:var(--nav-speed-gauge-left);
+  right:auto;
+  bottom:var(--nav-speed-gauge-bottom);
+  width:var(--nav-speed-gauge-size);
+  height:var(--nav-speed-gauge-size);
+}
+#navSpeedLimit[hidden]{display:none!important;}
+#navSpeedLimit.nav-speed-limit-sign {
+  position:absolute;z-index:12;pointer-events:none;
+  left:calc(var(--nav-speed-gauge-left) + var(--nav-speed-gauge-size) - 15px);
+  bottom:calc(var(--nav-speed-gauge-bottom) + var(--nav-speed-gauge-size) - 19px);
+  width:38px;height:38px;border-radius:50%;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  border:2.5px solid #db263d;
+  background:rgba(255,255,255,.97);
+  box-shadow:0 2px 9px rgba(14,39,58,.25),inset 0 1px 0 rgba(255,255,255,.7);
+  color:#263747;font-variant-numeric:tabular-nums;
+  line-height:1;gap:1px;
+}
+#navSpeedLimit .nav-speed-limit-caption{font-size:7px;font-weight:900;letter-spacing:.025em;}
+#navSpeedLimit strong{font-size:14px;font-weight:900;letter-spacing:-.04em;}
+#navSpeedLimit[data-known="false"]{
+  border-color:#879cac;background:rgba(242,247,251,.96);color:#5d7183;
+}
+body.dark #navSpeedLimit.nav-speed-limit-sign{
+  background:rgba(247,250,253,.97);color:#21364a;
+  border-color:#ff4b5e;
+}
+body.dark #navSpeedLimit[data-known="false"]{
+  border-color:#a3b6c6;color:#5d7183;
+}
+/* Strong and unmistakable overspeed feedback, visible against both map themes.
+   Preserve an amount of moving optical texture behind the red warning wash. */
+#navSpeed[data-overspeed="true"].nav-speed-gauge,
+body.dark #navSpeed[data-overspeed="true"].nav-speed-gauge,
+body[data-myarah-optical="on"] #navSpeed[data-overspeed="true"].nav-speed-gauge,
+body.dark[data-myarah-optical="on"] #navSpeed[data-overspeed="true"].nav-speed-gauge {
+  color:#fff;
+  border-color:rgba(255,100,113,.96);
+  box-shadow:0 7px 20px rgba(137,9,38,.35),0 0 0 2px rgba(242,32,62,.22),
+             inset 0 2px 0 rgba(255,255,255,.39);
+}
+#navSpeed[data-overspeed="true"].nav-speed-gauge::after{
+  content:'';position:absolute;inset:0;z-index:2;border-radius:inherit;
+  pointer-events:none;background:linear-gradient(155deg,rgba(232,44,61,.90),rgba(178,7,39,.94));
+}
+#navSpeed[data-overspeed="true"] .nav-speed-number,
+#navSpeed[data-overspeed="true"] .nav-speed-unit,
+body.dark #navSpeed[data-overspeed="true"] .nav-speed-number,
+body.dark #navSpeed[data-overspeed="true"] .nav-speed-unit,
+body[data-myarah-optical="on"] #navSpeed[data-overspeed="true"] .nav-speed-number,
+body[data-myarah-optical="on"] #navSpeed[data-overspeed="true"] .nav-speed-unit{
+  color:#fff;position:relative;z-index:4;text-shadow:0 1px 2px rgba(68,0,19,.25);
+}
+@media (orientation:landscape) and (max-height:560px){
+  .app {
+    --nav-speed-gauge-left:calc(env(safe-area-inset-left) + 13px);
+    --nav-speed-gauge-bottom:calc(env(safe-area-inset-bottom) + 83px);
+    --nav-speed-gauge-size:67px;
+  }
+  #navSpeedLimit.nav-speed-limit-sign{width:34px;height:34px;}
+  #navSpeedLimit .nav-speed-limit-caption{font-size:6px;}
+  #navSpeedLimit strong{font-size:13px;}
+}
+@media (orientation:landscape) and (max-height:560px) and (max-width:780px){
+  .app{--nav-speed-gauge-bottom:calc(env(safe-area-inset-bottom) + 150px);}
+}
+@media (orientation:portrait) and (max-width:365px){
+  .app {
+    --nav-speed-gauge-bottom:calc(env(safe-area-inset-bottom) + 152px);
+    --nav-speed-gauge-size:69px;
+  }
+}
+@media (prefers-contrast:more){
+  #navSpeedLimit.nav-speed-limit-sign{background:#fff;border-width:3px;}
+  #navSpeed[data-overspeed="true"].nav-speed-gauge::after{background:#b30025;}
+}
+@media (prefers-reduced-motion:reduce){
+  #navSpeed[data-overspeed="true"].nav-speed-gauge{transition:none;}
+}
