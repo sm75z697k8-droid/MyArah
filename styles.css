@@ -2431,3 +2431,56 @@ body[data-myarah-optical="on"] .myarah-optical-lens {
     background:rgba(27,47,69,.94);
   }
 }
+
+
+/* MyArah / End Navigation: premium red glass from the supplied reference.
+   The icon is a clear X (exit/end), NOT a phone handset or the previous
+   stop-square symbol. This overrides the earlier red button styles only. */
+#navFooter .nav-footer-buttons #navEnd.nav-end,
+body.dark #navFooter .nav-footer-buttons #navEnd.nav-end {
+  color:#fff;
+  border:1.6px solid rgba(255,69,101,.94);
+  background:
+    radial-gradient(ellipse 95% 33% at 50% -1%, rgba(255,255,255,.27), transparent 90%),
+    linear-gradient(165deg,#e60036 0%,#ce002e 50%,#ad002a 100%);
+  box-shadow:
+    0 6px 17px rgba(129,0,35,.32),
+    0 0 0 1px rgba(152,0,37,.20),
+    inset 0 2px 0 rgba(255,255,255,.24),
+    inset 0 -2px 5px rgba(78,0,19,.25);
+  -webkit-backdrop-filter:none;
+  backdrop-filter:none;
+}
+/* An unobtrusive curved sheen to suggest polished red glass. */
+#navFooter .nav-footer-buttons #navEnd.nav-end::before,
+body.dark #navFooter .nav-footer-buttons #navEnd.nav-end::before {
+  content:'';
+  position:absolute;
+  inset:2px;
+  border-radius:50%;
+  pointer-events:none;
+  background:radial-gradient(ellipse 78% 29% at 48% 0%,rgba(255,255,255,.26),rgba(255,255,255,0) 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.19);
+}
+#navFooter .nav-footer-buttons #navEnd.nav-end .nav-end-close-icon {
+  width:26px;
+  height:26px;
+  stroke:#fff;
+  fill:none;
+  stroke-width:3.6;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  position:relative;
+  z-index:2;
+  filter:drop-shadow(0 1px 1px rgba(94,0,24,.22));
+}
+#navFooter .nav-footer-buttons #navEnd.nav-end:active {
+  box-shadow:
+    0 3px 10px rgba(129,0,35,.24),
+    inset 0 2px 7px rgba(80,0,23,.24),
+    inset 0 1px 0 rgba(255,255,255,.16);
+}
+#navFooter .nav-footer-buttons #navEnd.nav-end:focus-visible {
+  outline:3px solid #7ed3ff;
+  outline-offset:3px;
+}

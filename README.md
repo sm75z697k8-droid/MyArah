@@ -612,3 +612,11 @@ No private API keys are embedded. Navigation, glass controls and GPS remain unch
 - In accessibility high-contrast mode, the map-lens contribution is reduced further.
 - `?glass=off` still turns off map refraction and falls back to lightweight CSS glass.
 - Please test on an actual iPhone, watching clarity, battery use and whether the map behind controls appears smoother during rotation and zoom.
+
+
+## Glossy red End Navigation button (UI refinement)
+- Replaced the ambiguous stop-square SVG with a bold, rounded white **X** that represents ending the trip. This is **not** a phone hang-up symbol.
+- Kept the circular button size, click target, existing `navEnd` ID and its End Navigation event handler.
+- Added a glossy red gradient, restrained highlight, fine red rim, and depth to match the supplied picture in both light and dark modes.
+- All other controls, refractive/frosted glass, voice playback, routing, toll rates and map behavior are unchanged.
+- For GitHub Pages, replace `index.html` and `styles.css` only. `app.js` remains byte-for-byte unchanged.
