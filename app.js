@@ -312,23 +312,29 @@ function add3DBuildings() {
 map.on('style.load', add3DBuildings);
 
 // === 3D ELEVATED ROADS (visual preview, not surveyed heights) ===
-// OpenFreeMap's OpenMapTiles `transportation` layer supplies bridge/tunnel and
-// OSM `layer` tags, *not measured road altitude*. Build small temporary deck
-// polygons from the visible bridge centre-lines. They are drawn only when 3D
-// is enabled and the map is zoomed in; 2D, route selection and GPS stay intact.
-const MYARAH_ROAD_LEVEL_SOURCE='myarah-3d-road-levels-source';
-const MYARAH_ROAD_LEVEL_LAYERS=[
-  'myarah-3d-road-shadow',
-  'myarah-3d-road-supports',
-  'myarah-3d-road-abutments',
-  'myarah-3d-road-decks',
-  'myarah-3d-road-route'
-];
-// A direct vector overlay remains visible even if generated extrusion polygons
-// are unavailable. It uses the same mapped bridge classification, not invented roads.
-const MYARAH_ROAD_BRIDGE_OUTLINE='myarah-3d-road-bridge-outline';
+// === 3D ROAD SURFACE INTEGRATION (visual only; routes/GPS remain unchanged) ===
+// A bridge is part of a road centreline, not a separate cuboid. Build a thin
+// connected ribbon whose height smoothly returns to the actual flat basemap at
+// each end. This avoids floating slabs, block-shaped piers and duplicated
+// flat bridge lines beneath the 3D replacement.
+// OpenStreetMap layer/brunnel indicate relative bridge stacking, NOT surveyed
+// height, grade, clearance, exact junction level, or real terrain altitude.
+const MYARAH_ROAD_SURFACE_ID='myarah-3d-road-surface';
 const MYARAH_ROAD_DEBUG=new URLSearchParams(location.search).get('debug3d')==='1';
+const MYARAH_ROAD_LEVEL_MIN_ZOOM=15.35;
+const MYARAH_ROAD_LEVEL_LIMIT=92;
+const MYARAH_ROAD_CLASSES=['motorway','motorway_link','trunk','trunk_link','primary',
+  'primary_link','secondary','secondary_link','tertiary','tertiary_link','minor','service'];
+const MYARAH_ROAD_WIDTHS={motorway:13.5,motorway_link:7.8,trunk:12,trunk_link:7.6,
+  primary:10.5,primary_link:7,secondary:9.2,secondary_link:6.8,
+  tertiary:8,tertiary_link:6.2,minor:6.4,service:5.5};
 let myarahRoadDebugNode=null;
+let myarahRoadSurfaceTimer=null;
+let myarahRoadSurfaceSignature='';
+let myarahRoadSurfaceDirty=true;
+let myarahRoadSurface=null;
+let myarahRoadMasked=false;
+const myarahNativeRoadFilters=new Map();
 function myarahRoadDebugStatus(message){
   if(!MYARAH_ROAD_DEBUG)return;
   if(!myarahRoadDebugNode){
@@ -341,367 +347,453 @@ function myarahRoadDebugStatus(message){
   myarahRoadDebugNode.hidden=!tilted;
   myarahRoadDebugNode.textContent=message;
 }
-const MYARAH_ROAD_LEVEL_MIN_ZOOM=15.35;
-const MYARAH_ROAD_LEVEL_LIMIT=145;
-const MYARAH_ROAD_LEVEL_EMPTY={type:'FeatureCollection',features:[]};
-let myarahRoadLevelTimer=null;
-let myarahRoadLevelSignature='';
-let myarahRoadLevelDirty=true;
-
 function myarahRoadDeckHeight(properties){
-  if(!properties || properties.brunnel==='tunnel' || properties.brunnel==='ford')return 0;
-  const layer=Number(properties.layer);
-  const bridge=properties.brunnel==='bridge';
-  if(!bridge && !(Number.isFinite(layer)&&layer>0))return 0;
-  const level=Number.isFinite(layer)&&layer>0?Math.min(4,Math.max(1,Math.round(layer))):1;
-  // OSM layer is relative stacking order, NOT metres. Use a gentler visual
-  // clearance so bridges read as elevated without feeling like floating slabs.
-  return 5.2+(level-1)*3.9;
-}
-function myarahRoadDeckBase(height){
-  if(!(height>0))return 0;
-  // Deck underside / clearance above the lower road.
-  return Math.max(2.4,height-1.05);
+  if(!properties||properties.brunnel==='tunnel'||properties.brunnel==='ford')return 0;
+  const level=Number(properties.layer);
+  const isBridge=properties.brunnel==='bridge';
+  if(!isBridge&&!(Number.isFinite(level)&&level>0))return 0;
+  // Subtle illustrated clearance, with layers only indicating stacking order.
+  const order=Number.isFinite(level)&&level>0?Math.min(3,Math.max(1,Math.round(level))):1;
+  return 4.8+(order-1)*3.6;
 }
 function myarahRoadDeckWidth(properties){
   const kind=String(properties?.class||'').toLowerCase();
-  // Skip rail, footpaths and unrelated transportation geometry.
-  const widths={motorway:14,trunk:12.5,primary:11,secondary:9.5,
-    tertiary:8.5,minor:7,service:6,motorway_link:8,trunk_link:8,
-    primary_link:7.2,secondary_link:7,tertiary_link:6.5};
-  if(!Object.prototype.hasOwnProperty.call(widths,kind))return 0;
-  return properties?.ramp===1 || properties?.ramp==='1'?Math.min(widths[kind],8):widths[kind];
-}
-function myarahRoadLevelPolygon(coords,widthMeters){
-  if(!Array.isArray(coords)||coords.length<2||coords.length>320 ||
-      !(widthMeters>0))return null;
-  const projected=myarahProjectRoadPoints(coords);
-  if(!projected)return null;
-  return myarahRoadPolygonFromProjected(projected.points,projected.mx,projected.my,widthMeters);
+  return Object.prototype.hasOwnProperty.call(MYARAH_ROAD_WIDTHS,kind)?MYARAH_ROAD_WIDTHS[kind]:0;
 }
 function myarahRoadLevelSegments(feature){
-  const geometry=feature?.geometry;
-  if(geometry?.type==='LineString')return [geometry.coordinates];
-  if(geometry?.type==='MultiLineString')return geometry.coordinates;
+  if(feature?.geometry?.type==='LineString')return [feature.geometry.coordinates];
+  if(feature?.geometry?.type==='MultiLineString')return feature.geometry.coordinates;
   return [];
 }
-function myarahRoadLevelNearView(coords,bounds){
-  const extra=.002;
-  return coords.some(point=>point[0]>=bounds.getWest()-extra &&
-    point[0]<=bounds.getEast()+extra &&point[1]>=bounds.getSouth()-extra &&
-    point[1]<=bounds.getNorth()+extra);
+function myarahRoadNearView(points,bounds){
+  const padding=.002;
+  return points.some(p=>Array.isArray(p)&&p[0]>=bounds.getWest()-padding&&
+    p[0]<=bounds.getEast()+padding&&p[1]>=bounds.getSouth()-padding&&
+    p[1]<=bounds.getNorth()+padding);
 }
-function myarahProjectRoadPoints(coords){
-  if(!Array.isArray(coords)||coords.length<2)return null;
-  const latitude=coords.reduce((sum,point)=>sum+(Number(point?.[1])||0),0)/coords.length;
-  const mx=111320*Math.max(.1,Math.cos(latitude*Math.PI/180)),my=110540;
+function myarahRoadDistance(a,b){
+  const lat=(a[1]+b[1])*.5*Math.PI/180;
+  return Math.hypot((a[0]-b[0])*111320*Math.cos(lat),(a[1]-b[1])*110540);
+}
+function myarahRoadTangent(points,end){
+  if(points.length<2)return [0,0];
+  const a=end?points[points.length-2]:points[0];
+  const b=end?points[points.length-1]:points[1];
+  const lat=(a[1]+b[1])*.5*Math.PI/180;
+  const delta=[(b[0]-a[0])*111320*Math.cos(lat),(b[1]-a[1])*110540];
+  const len=Math.hypot(...delta);
+  return len>0?delta.map(v=>v/len):[0,0];
+}
+function myarahRoadCanJoin(a,b){
+  const d1=myarahRoadTangent(a,true),d2=myarahRoadTangent(b,false);
+  return d1[0]*d2[0]+d1[1]*d2[1]>.34;
+}
+// Querying vector tiles can split one bridge into separate features. Merge only
+// aligned endpoints with matching class and layer, never a crossing or a branch.
+function myarahMergeBridgeSegments(raw){
+  const chains=[];
+  for(const item of raw){
+    let joined={...item,coords:item.coords.slice()};
+    let keepLooking=true;
+    while(keepLooking){
+      keepLooking=false;
+      for(let i=0;i<chains.length;i++){
+        const other=chains[i];
+        if(other.kind!==joined.kind||Math.abs(other.height-joined.height)>.01)continue;
+        const a=other.coords,b=joined.coords;
+        const variants=[
+          [a,b], [a,b.slice().reverse()],
+          [a.slice().reverse(),b], [b,a], [b.slice().reverse(),a]
+        ];
+        let candidate=null;
+        for(const [left,right] of variants){
+          if(myarahRoadDistance(left[left.length-1],right[0])>1.45)continue;
+          if(!myarahRoadCanJoin(left,right))continue;
+          candidate=[...left,...right.slice(1)];break;
+        }
+        if(!candidate)continue;
+        joined.coords=candidate;
+        chains.splice(i,1);
+        keepLooking=true;
+        break;
+      }
+    }
+    chains.push(joined);
+  }
+  return chains;
+}
+function myarahRoadBridgeSegments(features,bounds){
+  const raw=[],seen=new Set();
+  for(const feature of features){
+    const p=feature?.properties||{};
+    const height=myarahRoadDeckHeight(p),width=myarahRoadDeckWidth(p);
+    if(!height||!width)continue;
+    for(const coords of myarahRoadLevelSegments(feature)){
+      if(!Array.isArray(coords)||coords.length<2||coords.length>540||!myarahRoadNearView(coords,bounds))continue;
+      if(!coords.every(p=>Array.isArray(p)&&p.length>=2&&Number.isFinite(p[0])&&Number.isFinite(p[1])))continue;
+      const first=coords[0],last=coords[coords.length-1];
+      const mid=coords[Math.floor(coords.length/2)];
+      const ends=[[...first],[...last]].map(p=>p.map(n=>n.toFixed(6)).join(',')).sort();
+      const key=[p.class,p.layer,p.brunnel,ends.join(':'),mid.map(n=>n.toFixed(6)).join(','),coords.length].join('|');
+      if(seen.has(key))continue;
+      seen.add(key);
+      raw.push({kind:String(p.class).toLowerCase(),height,width,coords:coords.map(p=>[p[0],p[1]])});
+      if(raw.length>=MYARAH_ROAD_LEVEL_LIMIT*2.5)break;
+    }
+    if(raw.length>=MYARAH_ROAD_LEVEL_LIMIT*2.5)break;
+  }
+  const merged=myarahMergeBridgeSegments(raw).sort((a,b)=>{
+    const len=s=>s.coords.reduce((sum,p,i)=>i?sum+myarahRoadDistance(s.coords[i-1],p):0,0);
+    return len(b)-len(a);
+  });
+  return merged.slice(0,MYARAH_ROAD_LEVEL_LIMIT);
+}
+function myarahRoadSmoothstep(t){
+  const v=Math.max(0,Math.min(1,t));
+  return v*v*(3-2*v);
+}
+// Elevation is *continuous* along the surface: the first and last centreline
+// points join the existing flat road. The bridge interior rises gently.
+function myarahRoadSurfaceHeight(distance,length,maxHeight){
+  if(!(length>0)||!(maxHeight>0))return 0;
+  const approach=Math.min(35,Math.max(12,length*.32));
+  const rise=myarahRoadSmoothstep(distance/approach);
+  const fall=myarahRoadSmoothstep((length-distance)/approach);
+  return maxHeight*rise*fall;
+}
+function myarahRoadSampleLine(coords){
+  if(coords.length<2)return null;
+  const lat=coords.reduce((sum,p)=>sum+p[1],0)/coords.length;
+  const mx=111320*Math.max(.1,Math.cos(lat*Math.PI/180)),my=110540;
   const points=[];
-  for(const pair of coords){
-    if(!Array.isArray(pair)||pair.length<2||!pair.every(Number.isFinite))return null;
-    const next=[pair[0]*mx,pair[1]*my];
-    if(!points.length||Math.hypot(next[0]-points[points.length-1][0],
-        next[1]-points[points.length-1][1])>=.55)points.push(next);
+  for(const p of coords){
+    const v=[p[0]*mx,p[1]*my];
+    if(!points.length||Math.hypot(v[0]-points[points.length-1][0],v[1]-points[points.length-1][1])>.45)
+      points.push(v);
   }
   if(points.length<2)return null;
-  return {points,mx,my};
-}
-function myarahRoadPolygonFromProjected(points,mx,my,widthMeters){
-  if(!Array.isArray(points)||points.length<2||!(widthMeters>0))return null;
-  const left=[],right=[],half=widthMeters/2;
-  for(let i=0;i<points.length;i++){
-    const a=points[Math.max(0,i-1)],b=points[i],c=points[Math.min(points.length-1,i+1)];
-    const before=[b[0]-a[0],b[1]-a[1]],after=[c[0]-b[0],c[1]-b[1]];
-    const n1=Math.hypot(...before),n2=Math.hypot(...after);
-    if(n1<.01&&n2<.01)return null;
-    const d1=n1>=.01?before.map(v=>v/n1):after.map(v=>v/n2);
-    const d2=n2>=.01?after.map(v=>v/n2):d1;
-    const normal1=[-d1[1],d1[0]],normal2=[-d2[1],d2[0]];
-    let normal=[normal1[0]+normal2[0],normal1[1]+normal2[1]];
-    const len=Math.hypot(...normal);
-    if(len<.15)normal=normal2;
-    else normal=normal.map(v=>v/len);
-    const dot=Math.abs(normal[0]*normal2[0]+normal[1]*normal2[1]);
-    const offset=half*Math.min(1.65,1/Math.max(.45,dot));
-    left.push([(b[0]+normal[0]*offset)/mx,(b[1]+normal[1]*offset)/my]);
-    right.push([(b[0]-normal[0]*offset)/mx,(b[1]-normal[1]*offset)/my]);
+  const lengths=[0];
+  for(let i=1;i<points.length;i++)lengths.push(lengths[i-1]+Math.hypot(
+    points[i][0]-points[i-1][0],points[i][1]-points[i-1][1]));
+  const total=lengths[lengths.length-1];
+  if(total<9)return null;
+  const count=Math.max(2,Math.min(145,Math.ceil(total/8.5)));
+  const result=[];
+  let segment=1;
+  for(let i=0;i<=count;i++){
+    const distance=total*i/count;
+    while(segment<lengths.length-1&&lengths[segment]<distance)segment++;
+    const a=points[segment-1],b=points[segment];
+    const step=Math.max(.00001,lengths[segment]-lengths[segment-1]);
+    const t=Math.max(0,Math.min(1,(distance-lengths[segment-1])/step));
+    result.push({x:a[0]+(b[0]-a[0])*t,y:a[1]+(b[1]-a[1])*t,distance});
   }
-  const ring=[...left,...right.reverse(),left[0]];
-  if(!ring.every(point=>point.every(Number.isFinite)))return null;
-  let area=0;
-  for(let i=1;i<ring.length;i++)area+=ring[i-1][0]*ring[i][1]-ring[i][0]*ring[i-1][1];
-  if(area<0)ring.reverse();
-  return ring;
+  return {samples:result,total,mx,my};
 }
-function myarahRectangleRing(center,direction,halfLength,halfWidth,mx,my){
-  const dirLen=Math.hypot(direction[0],direction[1])||1;
-  const ux=direction[0]/dirLen,uy=direction[1]/dirLen;
-  const nx=-uy,ny=ux;
-  const corners=[
-    [center[0]-ux*halfLength+nx*halfWidth,center[1]-uy*halfLength+ny*halfWidth],
-    [center[0]+ux*halfLength+nx*halfWidth,center[1]+uy*halfLength+ny*halfWidth],
-    [center[0]+ux*halfLength-nx*halfWidth,center[1]+uy*halfLength-ny*halfWidth],
-    [center[0]-ux*halfLength-nx*halfWidth,center[1]-uy*halfLength-ny*halfWidth]
-  ].map(point=>[point[0]/mx,point[1]/my]);
-  return [...corners,corners[0]];
-}
-function myarahRoadSupportFeatures(points,mx,my,widthMeters,deckBase){
-  const features=[];
-  if(points.length<2||!(deckBase>2))return features;
-  let total=0;const cumulative=[0];
-  for(let i=1;i<points.length;i++){
-    total+=Math.hypot(points[i][0]-points[i-1][0],points[i][1]-points[i-1][1]);
-    cumulative.push(total);
-  }
-  if(total<26)return features;
-  const spacing=Math.max(26,Math.min(44,total/3));
-  const startAt=Math.min(18,total*.2),endAt=Math.max(total-startAt,startAt);
-  for(let dist=startAt;dist<endAt;dist+=spacing){
-    let index=1;
-    while(index<cumulative.length&&cumulative[index]<dist)index++;
-    const prev=points[Math.max(0,index-1)],next=points[Math.min(points.length-1,index)];
-    const seg=Math.max(.001,cumulative[index]-cumulative[index-1]);
-    const t=Math.max(0,Math.min(1,(dist-cumulative[index-1])/seg));
-    const center=[prev[0]+(next[0]-prev[0])*t,prev[1]+(next[1]-prev[1])*t];
-    const direction=[next[0]-prev[0],next[1]-prev[1]];
-    const ring=myarahRectangleRing(center,direction,1.05,Math.max(1.3,Math.min(2.2,widthMeters*.16)),mx,my);
-    features.push({type:'Feature',geometry:{type:'Polygon',coordinates:[ring]},
-      properties:{kind:'support',height:deckBase-.12,base:0,raisedRoute:0}});
-  }
-  return features;
-}
-function myarahRoadAbutmentFeatures(points,mx,my,widthMeters,deckBase){
-  const features=[];
-  if(points.length<2||!(deckBase>2.2))return features;
-  const halfLength=Math.max(5.5,Math.min(9.5,widthMeters*.85));
-  const halfWidth=Math.max(2.6,widthMeters*.48);
-  const pairs=[
-    {center:points[0],direction:[points[1][0]-points[0][0],points[1][1]-points[0][1]]},
-    {center:points[points.length-1],direction:[points[points.length-1][0]-points[points.length-2][0],points[points.length-1][1]-points[points.length-2][1]]}
-  ];
-  for(const pair of pairs){
-    const ring=myarahRectangleRing(pair.center,pair.direction,halfLength,halfWidth,mx,my);
-    features.push({type:'Feature',geometry:{type:'Polygon',coordinates:[ring]},
-      properties:{kind:'abutment',height:Math.max(1.4,deckBase*.72),base:0,raisedRoute:0}});
-  }
-  return features;
-}
-// Only visually highlight a raised route where the centreline is compatible
-// with a TomTom route section at several points and the bearing agrees.
-// Height is still illustrative, and is NEVER used for lane or GPS matching.
-function myarahVisibleRoadRouteSegments(route,bounds){
+function myarahRoadVisibleRoute(route,bounds){
   if(!Array.isArray(route)||route.length<2)return [];
   const west=bounds.getWest()-.006,east=bounds.getEast()+.006;
   const south=bounds.getSouth()-.006,north=bounds.getNorth()+.006;
-  const segments=[];
+  const lines=[];
   for(let i=1;i<route.length;i++){
     const a=route[i-1],b=route[i];
     if(Math.max(a[0],b[0])<west||Math.min(a[0],b[0])>east||
        Math.max(a[1],b[1])<south||Math.min(a[1],b[1])>north)continue;
-    segments.push([a,b]);
-    // Cap visual decoration, never alter the real TomTom route.
-    if(segments.length>=650)break;
+    lines.push([a,b]);
+    if(lines.length>=650)break;
   }
-  return segments;
+  return lines;
 }
-function myarahRoadLevelOnRoute(coords,route){
-  if(!route?.length || coords.length<2)return false;
-  const a=coords[0],b=coords[coords.length-1],mid=coords[Math.floor(coords.length/2)];
-  const samples=[a,mid,b];
-  const at=Math.cos(mid[1]*Math.PI/180)*111320;
-  const length=Math.hypot((b[0]-a[0])*at,(b[1]-a[1])*110540);
-  if(length<12)return false;
-  let passed=0;
-  for(const point of samples){
-    const x=point[0]*at,y=point[1]*110540;
-    let matched=false;
-    for(const [r0,r1] of route){
-      if(Math.abs(r0[0]-point[0])>.003 && Math.abs(r1[0]-point[0])>.003)continue;
-      if(Math.abs(r0[1]-point[1])>.003 && Math.abs(r1[1]-point[1])>.003)continue;
-      const dx=(r1[0]-r0[0])*at,dy=(r1[1]-r0[1])*110540;
-      const d2=dx*dx+dy*dy;
-      if(d2<4)continue;
-      const t=Math.max(0,Math.min(1,((x-r0[0]*at)*dx+(y-r0[1]*110540)*dy)/d2));
-      const distance=Math.hypot(r0[0]*at+t*dx-x,r0[1]*110540+t*dy-y);
-      // Using a line's overall direction is only reliable on nearly straight
-      // sections; curved flyovers are allowed to use the local line tangent.
-      const heading=Math.atan2(dy,dx),roadHeading=Math.atan2(
-        (b[1]-a[1])*110540,(b[0]-a[0])*at);
-      if(distance<9.5 && Math.abs(Math.cos(heading-roadHeading))>.68){
-        matched=true;break;
+// Do not infer which flyover a driver is on from an intersection crossing.
+function myarahRoadMatchesRoute(coords,segments){
+  if(!segments.length||coords.length<2)return false;
+  const samples=[coords[0],coords[Math.floor(coords.length/2)],coords[coords.length-1]];
+  let matched=0;
+  for(const sample of samples){
+    const mx=111320*Math.cos(sample[1]*Math.PI/180),my=110540;
+    for(const [a,b] of segments){
+      if(Math.abs(a[0]-sample[0])>.003&&Math.abs(b[0]-sample[0])>.003)continue;
+      if(Math.abs(a[1]-sample[1])>.003&&Math.abs(b[1]-sample[1])>.003)continue;
+      const dx=(b[0]-a[0])*mx,dy=(b[1]-a[1])*my;
+      const len2=dx*dx+dy*dy;
+      if(len2<4)continue;
+      const t=Math.min(1,Math.max(0,((sample[0]-a[0])*mx*dx+(sample[1]-a[1])*my*dy)/len2));
+      if(Math.hypot((a[0]+t*(b[0]-a[0])-sample[0])*mx,
+          (a[1]+t*(b[1]-a[1])-sample[1])*my)<7.8){matched++;break;}
+    }
+  }
+  return matched>=2;
+}
+function myarahRoadAddQuad(target,a,b,c,d){
+  target.push(...a,...b,...c,...c,...b,...d);
+}
+// Batch 5 surfaces into one lightweight WebGL2 custom layer, aligned using
+// MapLibre's own Mercator projection matrix. Unlike fill-extrusions, vertices
+// here can have DIFFERENT elevations, creating a true sloped roadway mesh.
+function myarahBuildRoadRibbon(chains,routeSegments){
+  const meshes={shadow:[],wall:[],surface:[],edge:[],route:[]};
+  let anchor=null,rendered=0,triangles=0;
+  function xyz(pos,height){
+    const xy=maplibregl.MercatorCoordinate.fromLngLat([pos.x,pos.y]);
+    if(!anchor)anchor={x:xy.x,y:xy.y};
+    return [xy.x-anchor.x,xy.y-anchor.y,
+      Math.max(.035,height)*xy.meterInMercatorCoordinateUnits()];
+  }
+  for(const chain of chains){
+    const sample=myarahRoadSampleLine(chain.coords);
+    if(!sample)continue;
+    const {samples,total,mx,my}=sample;
+    const mesh=[];
+    const matched=myarahRoadMatchesRoute(chain.coords,routeSegments);
+    for(let i=0;i<samples.length;i++){
+      const p=samples[i],prev=samples[Math.max(0,i-1)],next=samples[Math.min(samples.length-1,i+1)];
+      const dx=next.x-prev.x,dy=next.y-prev.y;
+      const norm=Math.max(.001,Math.hypot(dx,dy));
+      const nx=-dy/norm,ny=dx/norm;
+      const elevation=.08+myarahRoadSurfaceHeight(p.distance,total,chain.height);
+      // Surface is centered on the source road rather than being a second
+      // disconnected polygon above it. Edges taper to the native road at ends.
+      const coord=(side,offset)=>({x:(p.x+nx*offset*side)/mx,y:(p.y+ny*offset*side)/my});
+      const half=chain.width*.5;
+      const l=coord(1,half),r=coord(-1,half);
+      const edge=Math.min(.24,chain.width*.028);
+      const leftIn=coord(1,half-edge),rightIn=coord(-1,half-edge);
+      const topL=xyz(l,elevation),topR=xyz(r,elevation);
+      const wallDepth=Math.min(.36,Math.max(0,(elevation-.08)*.15));
+      const underside=Math.max(.055,elevation-wallDepth);
+      mesh.push({topL,topR,bottomL:xyz(l,underside),bottomR:xyz(r,underside),
+        edgeL:xyz(leftIn,elevation+.018),edgeR:xyz(rightIn,elevation+.018),
+        stripeL:matched?xyz(coord(1,Math.min(1.55,chain.width*.16)),elevation+.065):null,
+        stripeR:matched?xyz(coord(-1,Math.min(1.55,chain.width*.16)),elevation+.065):null,
+        shL:xyz(coord(1,Math.max(.1,half-1.4)),.055),
+        shR:xyz(coord(-1,Math.max(.1,half-1.4)),.055),
+        elevation});
+    }
+    for(let i=1;i<mesh.length;i++){
+      const a=mesh[i-1],b=mesh[i];
+      myarahRoadAddQuad(meshes.surface,a.topL,a.topR,b.topL,b.topR);
+      myarahRoadAddQuad(meshes.wall,a.topL,a.bottomL,b.topL,b.bottomL);
+      myarahRoadAddQuad(meshes.wall,a.bottomR,a.topR,b.bottomR,b.topR);
+      myarahRoadAddQuad(meshes.edge,a.topL,a.edgeL,b.topL,b.edgeL);
+      myarahRoadAddQuad(meshes.edge,a.edgeR,a.topR,b.edgeR,b.topR);
+      if(matched)myarahRoadAddQuad(meshes.route,a.stripeL,a.stripeR,b.stripeL,b.stripeR);
+      if(a.elevation>1.65&&b.elevation>1.65)
+        myarahRoadAddQuad(meshes.shadow,a.shL,a.shR,b.shL,b.shR);
+    }
+    rendered++;
+  }
+  for(const mesh of Object.values(meshes))triangles+=mesh.length/9;
+  return {meshes,anchor:anchor||{x:0,y:0},rendered,triangles};
+}
+function myarahMakeRoadSurfaceLayer(){
+  return {
+    id:MYARAH_ROAD_SURFACE_ID,type:'custom',renderingMode:'3d',
+    active:false,meshes:null,anchor:{x:0,y:0},buffers:null,
+    onAdd(_map,gl){
+      this.gl=gl;
+      try{
+        // MapLibre GL JS v6 uses WebGL2. Keep the shaders dependency-free.
+        const vertex=`#version 300 es\nprecision highp float;\nin vec3 a_pos;\nuniform mat4 u_matrix;\nvoid main(){gl_Position=u_matrix*vec4(a_pos,1.0);}`;
+        const fragment=`#version 300 es\nprecision highp float;\nuniform vec4 u_color;\nout vec4 fragColor;\nvoid main(){fragColor=u_color;}`;
+        const shader=(type,source)=>{
+          const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);
+          if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s)||'shader compile failed');
+          return s;
+        };
+        const vs=shader(gl.VERTEX_SHADER,vertex),fs=shader(gl.FRAGMENT_SHADER,fragment);
+        this.program=gl.createProgram();gl.attachShader(this.program,vs);gl.attachShader(this.program,fs);
+        gl.linkProgram(this.program);
+        if(!gl.getProgramParameter(this.program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(this.program)||'shader link failed');
+        gl.deleteShader(vs);gl.deleteShader(fs);
+        this.aPos=gl.getAttribLocation(this.program,'a_pos');
+        this.uMatrix=gl.getUniformLocation(this.program,'u_matrix');
+        this.uColor=gl.getUniformLocation(this.program,'u_color');
+        this.buffers={};this.counts={};
+        for(const k of ['shadow','wall','surface','edge','route']){
+          this.buffers[k]=gl.createBuffer();this.counts[k]=0;
+        }
+      }catch(error){
+        this.program=null;
+        myarahRoadDebugStatus('3D road shader unavailable: '+(error?.message||'unknown error'));
+        console.warn('[MyArah] Sloped 3D bridge renderer unavailable',error);
+      }
+    },
+    setMesh(data){
+      this.anchor=data.anchor;
+      this.meshes=data.meshes;
+      const gl=this.gl;
+      if(!this.program||!this.buffers||!gl)return;
+      for(const [kind,array] of Object.entries(this.meshes)){
+        gl.bindBuffer(gl.ARRAY_BUFFER,this.buffers[kind]);
+        gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(array),gl.DYNAMIC_DRAW);
+        this.counts[kind]=array.length/3;
+      }
+      map.triggerRepaint();
+    },
+    render(gl,args){
+      if(!this.active||!this.program||!this.counts?.surface||!tilted||
+          map.getZoom()<MYARAH_ROAD_LEVEL_MIN_ZOOM)return;
+      const matrix=args?.defaultProjectionData?.mainMatrix||args?.modelViewProjectionMatrix;
+      if(!matrix)return;
+      // Keep the mesh near the origin for iPhone float32 precision. Translation
+      // happens in double-precision JS before uploading the projection matrix.
+      const shifted=Float32Array.from(matrix);
+      const {x,y}=this.anchor;
+      shifted[12]=matrix[0]*x+matrix[4]*y+matrix[12];
+      shifted[13]=matrix[1]*x+matrix[5]*y+matrix[13];
+      shifted[14]=matrix[2]*x+matrix[6]*y+matrix[14];
+      shifted[15]=matrix[3]*x+matrix[7]*y+matrix[15];
+      gl.useProgram(this.program);
+      gl.uniformMatrix4fv(this.uMatrix,false,shifted);
+      gl.disable(gl.CULL_FACE);
+      gl.enable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+      gl.enableVertexAttribArray(this.aPos);
+      const palette=dark?{
+        shadow:[.02,.06,.09,.16],wall:[.34,.42,.48,1],surface:[.51,.60,.67,1],
+        edge:[.31,.40,.48,.95],route:[.25,.64,1,.94]
+      }:{
+        shadow:[.17,.23,.30,.19],wall:[.65,.70,.74,1],surface:[.974,.982,.988,1],
+        edge:[.66,.72,.77,.94],route:[.08,.47,.84,.94]
+      };
+      for(const kind of ['shadow','wall','surface','edge','route']){
+        if(!this.counts[kind])continue;
+        gl.uniform4fv(this.uColor,palette[kind]);
+        gl.bindBuffer(gl.ARRAY_BUFFER,this.buffers[kind]);
+        gl.vertexAttribPointer(this.aPos,3,gl.FLOAT,false,0,0);
+        gl.drawArrays(gl.TRIANGLES,0,this.counts[kind]);
+      }
+      gl.disableVertexAttribArray(this.aPos);
+    },
+    onRemove(_map,gl){
+      for(const b of Object.values(this.buffers||{}))if(b)gl.deleteBuffer(b);
+      if(this.program)gl.deleteProgram(this.program);
+      this.buffers=null;this.program=null;this.counts=null;this.gl=null;
+    }
+  };
+}
+// Hide ONLY the underlying native bridge LINE in 3D when a corresponding
+// raised ribbon is ready. The original road geometry / routing data is never
+// changed, and the basemap filter is restored in 2D and at distant zooms.
+function myarahSetNativeBridgeLinesHidden(shouldHide){
+  if(myarahRoadMasked===shouldHide)return;
+  myarahRoadMasked=shouldHide;
+  const layers=map.getStyle()?.layers||[];
+  if(shouldHide){
+    const exclude=['!', ['all',
+      ['==',['get','brunnel'],'bridge'],
+      ['in',['get','class'],['literal',MYARAH_ROAD_CLASSES]]
+    ]];
+    for(const layer of layers){
+      if(layer.type!=='line'||layer['source-layer']!=='transportation'||
+          layer.id.startsWith('myarah-')||layer.source==='myarah-building-data')continue;
+      const original=map.getFilter(layer.id)||null;
+      myarahNativeRoadFilters.set(layer.id,original);
+      const filter=original?['all',original,exclude]:exclude;
+      try{map.setFilter(layer.id,filter);}catch(error){
+        console.warn('[MyArah] Basemap bridge filter could not be set',layer.id,error);
+        myarahNativeRoadFilters.delete(layer.id);
       }
     }
-    if(matched)passed++;
-  }
-  return passed>=2;
-}
-function myarahBuildRoadLevelGeojson(features,bounds,route){
-  const collection=[],seen=new Set(),signature=[];
-  const visibleRoute=myarahVisibleRoadRouteSegments(route,bounds);
-  for(const feature of features){
-    const height=myarahRoadDeckHeight(feature?.properties);
-    const width=myarahRoadDeckWidth(feature?.properties);
-    if(!height||!width)continue;
-    for(const line of myarahRoadLevelSegments(feature)){
-      if(!Array.isArray(line)||line.length<2||!myarahRoadLevelNearView(line,bounds))continue;
-      const begin=line[0],end=line[line.length-1];
-      const mid=line[Math.floor(line.length/2)];
-      const key=[feature.properties?.class,feature.properties?.layer,
-        feature.properties?.brunnel,line.length,
-        ...begin.map(value=>Number(value).toFixed(5)),
-        ...mid.map(value=>Number(value).toFixed(5)),
-        ...end.map(value=>Number(value).toFixed(5))].join(':');
-      if(seen.has(key))continue;
-      seen.add(key);
-      const projected=myarahProjectRoadPoints(line);
-      if(!projected)continue;
-      const polygon=myarahRoadPolygonFromProjected(projected.points,projected.mx,projected.my,width);
-      if(!polygon)continue;
-      const routeMatch=myarahRoadLevelOnRoute(line,visibleRoute);
-      const deckBase=myarahRoadDeckBase(height);
-      collection.push({type:'Feature',geometry:{type:'Polygon',coordinates:[polygon]},
-        properties:{kind:'deck',height,base:deckBase,raisedRoute:routeMatch?1:0}});
-      for(const extra of myarahRoadSupportFeatures(projected.points,projected.mx,projected.my,width,deckBase))collection.push(extra);
-      for(const extra of myarahRoadAbutmentFeatures(projected.points,projected.mx,projected.my,width,deckBase))collection.push(extra);
-      signature.push(key+(routeMatch?'+':''));
-      if(collection.length>=MYARAH_ROAD_LEVEL_LIMIT*4)break;
+  }else{
+    for(const [id,filter] of myarahNativeRoadFilters){
+      if(!map.getLayer(id))continue;
+      try{map.setFilter(id,filter);}catch(error){
+        console.warn('[MyArah] Basemap road filter restore failed',id,error);
+      }
     }
-    if(collection.length>=MYARAH_ROAD_LEVEL_LIMIT*4)break;
+    myarahNativeRoadFilters.clear();
   }
-  return {data:{type:'FeatureCollection',features:collection},signature:signature.sort().join('|')};
 }
 function myarahRoadLevelShouldDraw(){
-  return tilted && !document.hidden && map.getZoom()>=MYARAH_ROAD_LEVEL_MIN_ZOOM &&
-    Boolean(map.getSource(MYARAH_ROAD_LEVEL_SOURCE)) &&
-    Boolean(map.getSource('myarah-building-data'));
+  return tilted&&!document.hidden&&map.getZoom()>=MYARAH_ROAD_LEVEL_MIN_ZOOM&&
+    Boolean(map.getSource('myarah-building-data'))&&Boolean(map.getLayer(MYARAH_ROAD_SURFACE_ID));
 }
 function myarahRefreshRoadLevels(){
-  myarahRoadLevelTimer=null;
+  myarahRoadSurfaceTimer=null;
   if(!myarahRoadLevelShouldDraw())return;
   let tiles;
   try{tiles=map.querySourceFeatures('myarah-building-data',{sourceLayer:'transportation'});}
-  catch(error){myarahRoadDebugStatus('3D roads: vector tile query failed — '+(error?.message||'unknown error'));return;}
+  catch(error){myarahRoadDebugStatus('3D road tile query failed: '+(error?.message||'unknown error'));return;}
   if(!Array.isArray(tiles))return;
-  // Cache and only set GeoJSON when the loaded bridge geometry has changed;
-  // setting it on every map idle would itself schedule another idle callback.
-  const selected=typeof routeOptions!=='undefined'?routeOptions[routeSelected]?.coordinates:null;
-  const next=myarahBuildRoadLevelGeojson(tiles,map.getBounds(),selected);
-  const mappedBridges=tiles.filter(feature=>myarahRoadDeckHeight(feature?.properties)>0).length;
-  const loaded=map.isSourceLoaded('myarah-building-data');
-  myarahRoadDebugStatus('3D roads · zoom '+map.getZoom().toFixed(1)+
-    ' · tile features: '+tiles.length+' · tagged bridges: '+mappedBridges+
-    ' · generated pieces: '+next.data.features.length+
-    (loaded?'':' · loading tiles…'));
-  if(next.signature===myarahRoadLevelSignature&&!myarahRoadLevelDirty)return;
-  myarahRoadLevelSignature=next.signature;
-  myarahRoadLevelDirty=false;
-  map.getSource(MYARAH_ROAD_LEVEL_SOURCE)?.setData(next.data);
+  const bounds=map.getBounds();
+  const chains=myarahRoadBridgeSegments(tiles,bounds);
+  const route=typeof routeOptions!=='undefined'?routeOptions[routeSelected]?.coordinates:null;
+  const visibleRoute=myarahRoadVisibleRoute(route,bounds);
+  const signature=chains.map(c=>{
+    const a=c.coords[0],b=c.coords[c.coords.length-1];
+    return [c.kind,c.height,c.coords.length,...a.map(n=>n.toFixed(5)),...b.map(n=>n.toFixed(5))].join(':');
+  }).sort().join('|')+(visibleRoute.length?':route'+routeSelected:'');
+  if(!myarahRoadSurfaceDirty&&signature===myarahRoadSurfaceSignature)return;
+  const built=myarahBuildRoadRibbon(chains,visibleRoute);
+  myarahRoadSurfaceSignature=signature;
+  myarahRoadSurfaceDirty=false;
+  if(myarahRoadSurface){
+    myarahRoadSurface.setMesh(built);
+    myarahRoadSurface.active=Boolean(built.rendered);
+  }
+  // Never hide more native roads than the limited visual mesh can replace.
+  const coverageComplete=chains.length<MYARAH_ROAD_LEVEL_LIMIT;
+  myarahSetNativeBridgeLinesHidden(Boolean(built.rendered&&coverageComplete&&myarahRoadSurface?.program));
+  myarahRoadDebugStatus('3D bridge surfaces · tiles: '+tiles.length+
+    ' · matched roads: '+chains.length+' · seamless ribbons: '+built.rendered+
+    ' · triangles: '+built.triangles+(!coverageComplete?' · coverage limited':'')+
+    (map.isSourceLoaded('myarah-building-data')?'':' · loading…'));
 }
 function myarahQueueRoadLevels(force=false){
-  if(force)myarahRoadLevelDirty=true;
+  if(force)myarahRoadSurfaceDirty=true;
   if(!myarahRoadLevelShouldDraw())return;
-  if(myarahRoadLevelTimer!==null)clearTimeout(myarahRoadLevelTimer);
-  myarahRoadLevelTimer=setTimeout(myarahRefreshRoadLevels,175);
+  if(myarahRoadSurfaceTimer!==null)clearTimeout(myarahRoadSurfaceTimer);
+  myarahRoadSurfaceTimer=setTimeout(myarahRefreshRoadLevels,170);
 }
 function myarahSetRoadLevelVisibility(){
-  const visibility=tilted?'visible':'none';
-  if(map.getLayer(MYARAH_ROAD_BRIDGE_OUTLINE))map.setLayoutProperty(MYARAH_ROAD_BRIDGE_OUTLINE,'visibility',visibility);
   if(myarahRoadDebugNode)myarahRoadDebugNode.hidden=!tilted;
-  if(tilted)myarahRoadDebugStatus('3D roads · waiting for bridge tiles…');
-  for(const layer of MYARAH_ROAD_LEVEL_LAYERS){
-    if(map.getLayer(layer))map.setLayoutProperty(layer,'visibility',visibility);
+  const enabled=myarahRoadLevelShouldDraw();
+  if(myarahRoadSurface)myarahRoadSurface.active=enabled&&Boolean(myarahRoadSurface.meshes?.surface?.length);
+  if(!enabled){
+    if(myarahRoadSurfaceTimer!==null)clearTimeout(myarahRoadSurfaceTimer);
+    myarahRoadSurfaceTimer=null;
+    myarahSetNativeBridgeLinesHidden(false);
+  }else{
+    myarahRoadDebugStatus('3D bridges · preparing sloped road surfaces…');
+    myarahQueueRoadLevels(true);
   }
-  if(!tilted){
-    if(myarahRoadLevelTimer!==null)clearTimeout(myarahRoadLevelTimer);
-    myarahRoadLevelTimer=null;
-  }else myarahQueueRoadLevels(true);
+  map.triggerRepaint();
 }
 function myarahInstallRoadLevels(){
-  myarahRoadLevelSignature='';
-  myarahRoadLevelDirty=true;
-  if(!map.getSource(MYARAH_ROAD_LEVEL_SOURCE)){
-    map.addSource(MYARAH_ROAD_LEVEL_SOURCE,{type:'geojson',data:MYARAH_ROAD_LEVEL_EMPTY});
+  myarahRoadSurfaceSignature='';myarahRoadSurfaceDirty=true;
+  myarahRoadMasked=false;myarahNativeRoadFilters.clear();
+  if(map.getLayer(MYARAH_ROAD_SURFACE_ID))return;
+  myarahRoadSurface=myarahMakeRoadSurfaceLayer();
+  const firstLabel=map.getStyle()?.layers?.find(l=>l.type==='symbol')?.id;
+  try{map.addLayer(myarahRoadSurface,firstLabel);}catch(error){
+    console.warn('[MyArah] Cannot install 3D road ribbon renderer',error);
+    myarahRoadDebugStatus('3D road renderer unavailable. Map and navigation remain usable.');
+    myarahRoadSurface=null;
+    return;
   }
-  const firstLabel=map.getStyle()?.layers?.find(layer=>layer.type==='symbol')?.id;
-  // Bridge edge highlight uses the native vector line directly, independent
-  // of the temporary polygon-generation path. This makes tagged bridges
-  // discoverable on iPhones while clearly distinguishing them from ground roads.
-  if(!map.getLayer(MYARAH_ROAD_BRIDGE_OUTLINE))map.addLayer({
-    id:MYARAH_ROAD_BRIDGE_OUTLINE,
-    type:'line',
-    source:'myarah-building-data',
-    'source-layer':'transportation',
-    minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
-    filter:['all',['==',['get','brunnel'],'bridge'],
-      ['in',['get','class'],['literal',['motorway','trunk','primary','secondary','tertiary','minor','service']]]],
-    layout:{visibility:tilted?'visible':'none','line-cap':'round','line-join':'round'},
-    paint:{
-      'line-color':dark?'#a7d0f3':'#267da9',
-      'line-opacity':.95,
-      'line-width':['interpolate',['linear'],['zoom'],15.35,1.7,17,3.3,19,5.5],
-      'line-dasharray':[2.5,1.7]
-    }
-  },firstLabel);
-  if(!map.getLayer(MYARAH_ROAD_LEVEL_LAYERS[0]))map.addLayer({
-    id:MYARAH_ROAD_LEVEL_LAYERS[0],
-    type:'fill',source:MYARAH_ROAD_LEVEL_SOURCE,minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
-    filter:['==',['get','kind'],'deck'],
-    layout:{visibility:tilted?'visible':'none'},
-    paint:{'fill-color':dark?'#08121c':'#405565','fill-opacity':dark?.30:.24}
-  },firstLabel);
-  if(!map.getLayer(MYARAH_ROAD_LEVEL_LAYERS[1]))map.addLayer({
-    id:MYARAH_ROAD_LEVEL_LAYERS[1],type:'fill-extrusion',
-    source:MYARAH_ROAD_LEVEL_SOURCE,minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
-    filter:['==',['get','kind'],'support'],
-    layout:{visibility:tilted?'visible':'none'},
-    paint:{'fill-extrusion-color':dark?'#637789':'#c5d0d8',
-      'fill-extrusion-opacity':dark?.82:.84,
-      'fill-extrusion-height':['get','height'],
-      'fill-extrusion-base':['get','base']}
-  },firstLabel);
-  if(!map.getLayer(MYARAH_ROAD_LEVEL_LAYERS[2]))map.addLayer({
-    id:MYARAH_ROAD_LEVEL_LAYERS[2],type:'fill-extrusion',
-    source:MYARAH_ROAD_LEVEL_SOURCE,minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
-    filter:['==',['get','kind'],'abutment'],
-    layout:{visibility:tilted?'visible':'none'},
-    paint:{'fill-extrusion-color':dark?'#6f8799':'#d6dfe6',
-      'fill-extrusion-opacity':dark?.88:.90,
-      'fill-extrusion-height':['get','height'],
-      'fill-extrusion-base':['get','base']}
-  },firstLabel);
-  if(!map.getLayer(MYARAH_ROAD_LEVEL_LAYERS[3]))map.addLayer({
-    id:MYARAH_ROAD_LEVEL_LAYERS[3],type:'fill-extrusion',
-    source:MYARAH_ROAD_LEVEL_SOURCE,minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
-    filter:['==',['get','kind'],'deck'],
-    layout:{visibility:tilted?'visible':'none'},
-    paint:{'fill-extrusion-color':dark?'#7c96aa':'#e4ebef',
-      'fill-extrusion-opacity':dark?.95:.97,
-      'fill-extrusion-vertical-gradient':true,
-      'fill-extrusion-height':['get','height'],
-      'fill-extrusion-base':['get','base']}
-  },firstLabel);
-  // Repaint only the bridge portions that confidently align with the chosen
-  // TomTom route, to avoid showing the route underneath its own bridge deck.
-  if(!map.getLayer(MYARAH_ROAD_LEVEL_LAYERS[4]))map.addLayer({
-    id:MYARAH_ROAD_LEVEL_LAYERS[4],type:'fill-extrusion',
-    source:MYARAH_ROAD_LEVEL_SOURCE,minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
-    filter:['all',['==',['get','kind'],'deck'],['==',['get','raisedRoute'],1]],
-    layout:{visibility:tilted?'visible':'none'},
-    paint:{'fill-extrusion-color':dark?'#4fa9ff':'#187ed9',
-      'fill-extrusion-opacity':1,
-      'fill-extrusion-height':['+',['get','height'],.14],
-      'fill-extrusion-base':['get','height']}
-  },firstLabel);
   myarahQueueRoadLevels(true);
 }
 map.on('style.load',myarahInstallRoadLevels);
-map.on('idle',()=>{
-  if(myarahRoadLevelDirty)myarahQueueRoadLevels();
+map.on('idle',()=>{if(myarahRoadSurfaceDirty)myarahQueueRoadLevels();});
+map.on('moveend',()=>{
+  if(!myarahRoadLevelShouldDraw())myarahSetRoadLevelVisibility();
+  else myarahQueueRoadLevels();
 });
-map.on('moveend',()=>myarahQueueRoadLevels());
 map.on('sourcedata',event=>{
-  if(event.sourceId==='myarah-building-data' && event.isSourceLoaded && tilted){
-    myarahRoadLevelDirty=true;
+  if(event.sourceId==='myarah-building-data'&&event.isSourceLoaded&&tilted){
+    myarahRoadSurfaceDirty=true;
     myarahQueueRoadLevels();
+  }
+});
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){
+    if(myarahRoadSurfaceTimer!==null)clearTimeout(myarahRoadSurfaceTimer);
+    myarahRoadSurfaceTimer=null;
+    if(myarahRoadSurface)myarahRoadSurface.active=false;
+  }else if(tilted){
+    myarahSetRoadLevelVisibility();
   }
 });
 // === END 3D ELEVATED ROADS ===

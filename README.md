@@ -844,3 +844,15 @@ We could not confirm live vector tiles or visual performance on a physical iPhon
 - Added support columns and end abutments to visually connect elevated roads back to the ground.
 - Strengthened the deck shadow and kept the route highlight only on bridge sections that confidently match the chosen TomTom route.
 - This remains illustrative 3D rendering based on OSM bridge/layer tags, not surveyed bridge clearance.
+
+
+## 3D Road Surface Integration — experimental (November 2026)
+
+This update replaces the previous detached 3D bridge blocks, support posts and rectangular abutments with **one continuous roadway surface** that follows the bridge centerline. Rather than extruding a whole flat polygon to a constant height, a lightweight MapLibre custom WebGL2 layer makes individual road vertices rise and fall gradually. It uses a subtle side edge and underside, plus a soft ground shadow. Road surfaces taper back to the original basemap road at both ends.
+
+- In 3D at zoom 15.35+, mapped bridges get the blended elevated roadway treatment. The flat basemap bridge lines are suppressed only when the WebGL replacement has sufficient coverage; the original basemap is restored in 2D.
+- Nearby bridge tile sections are joined only when their endpoints, road class and stacking level align, not where roads merely cross.
+- Bridge surfaces remain **visual approximations** based on OSM `brunnel` and `layer` tags, NOT real surveyed engineering profiles, ramp grades or clearances. An imperfect data boundary can still create a seam; there is no true ground elevation model or road-level routing awareness.
+- Use `?debug3d=1` in the GitHub Pages URL to see how many bridge surfaces the map can construct.
+- Navigation GPS, routing, guidance, speedometer, tolls, voice, and Liquid Glass are unchanged.
+- Check flyovers visually in iPhone Safari 3D mode, then return to 2D when you prefer the original map.
