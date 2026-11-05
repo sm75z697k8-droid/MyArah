@@ -1,3 +1,24 @@
+# MyArah — 3D Bridge-to-Road Connections Refined
+
+This revision addresses the visible height gaps between elevated road sections and their connecting roads at the Johor Bahru J5/E14 interchange. It uses the actual public road geometry exported from MyArah by the user to verify the joins. **It does not infer exact engineered elevations or create roads where source mapping is absent.**
+
+## What changed
+- At a **verified bridge-to-bridge connection**, match the deck height at the shared endpoint. Bridge sections tagged with different relative levels now ease into one another over a short stretch of their own mapped centerline, rather than meeting at two different heights.
+- At a **verified bridge-to-ground connection**, follow the actual ground-road centerline across successive mapped road fragments, even when the first fragment is only a few metres long. The 3D surface lowers all the way to the native 2D road, with the grade extending gently into the bridge when necessary.
+- Make connected road ribbons agree on their **edge orientation** at shared bridge endpoints, reducing visible V-shaped openings between adjoining surfaces.
+- Reject ambiguous branches: connecting roads must share an endpoint, be the same road class and have a compatible heading. Don't attach a bridge to a road merely because it crosses nearby.
+- Preserve the continuous WebGL2 road renderer, per-road safety checks, overlap-edge suppression, 2D view, real navigation, natural English voice, lane guidance, toll prices and Liquid Glass.
+- Refresh the browser cache version and add `level joins` / `aligned joins` to the optional `?debug3d=1` overlay.
+
+## Testing and limitations
+- Replayed the user's 259-feature GeoJSON export: 22 tagged bridge road sections; **6 confirmed changed-height bridge connections are now continuous**; 7 have verified ground-road approaches (some now traverse multiple ground fragments); and all 22 were retained by the mesh safety checks.
+- Tested road-edge alignment, synthetic multilayer and ground joins, and rejection of perpendicular crossing roads. JavaScript syntax and ZIP integrity checked.
+- **Not yet verified visually on the user's iPhone.** Where mapping doesn't include a reliable adjoining ground road, MyArah does not fabricate a connection; such pieces may still appear separated from the flat map. The reported heights (4.6 m, 8.7 m, 12.8 m) remain illustrative, and 3D shapes must not be used for lane/route decisions.
+
+To install, replace the four root files in your GitHub Pages repository. Refresh the browser and revisit the same interchange in 3D. Use `?debug3d=1` to view connections and download diagnostic road data if necessary.
+
+---
+
 # MyArah — Source Road Elevation Refined
 
 This update starts from the **exact same OpenMapTiles transportation road centerlines** as the existing 2D map, then draws only confirmed elevated road sections in 3D. Unlike the previous geometry pass, it does not merge unrelated fragments to invent a new road path.

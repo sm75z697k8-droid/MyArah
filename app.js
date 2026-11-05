@@ -555,63 +555,147 @@ function myarahRoadEndpointHeading(points,atStart){
   const length=Math.hypot(...meters);
   return length>0?meters.map(v=>v/length):[0,0];
 }
-function myarahRoadApproach(chain,candidates,atStart,maxLength=65){
+// Only extend along ground roads that share an actual mapped node and have a
+// compatible tangent. Follow short OSM fragments through their next node so
+// a 12 m tile piece does not have to climb an entire flyover in 12 metres.
+function myarahRoadApproach(chain,candidates,atStart,maxLength=85){
   const points=chain.coords;
   const end=atStart?points[0]:points[points.length-1];
-  const intoBridge=myarahRoadEndpointHeading(points,atStart);
-  const matches=[];
-  for(const road of candidates){
-    // Exact road class prevents a side road or opposite carriageway being used.
-    if(road.kind!==chain.kind)continue;
-    for(const endpointIsFirst of [true,false]){
-      const roadEnd=endpointIsFirst?road.coords[0]:road.coords[road.coords.length-1];
-      if(myarahRoadDistance(end,roadEnd)>1.7)continue;
-      const roadHeading=myarahRoadEndpointHeading(road.coords,endpointIsFirst);
-      const dot=intoBridge[0]*roadHeading[0]+intoBridge[1]*roadHeading[1];
-      // Ground road must continue *outward* from bridge on same axis.
-      if(dot>-.85)continue;
-      const outward=endpointIsFirst?road.coords:road.coords.slice().reverse();
-      const result=[end];let length=0;
-      for(let i=1;i<outward.length;i++){
-        const previous=result[result.length-1],next=outward[i];
-        const d=myarahRoadDistance(previous,next);
-        if(d<.25)continue;
-        if(length+d>maxLength){
-          const t=(maxLength-length)/d;
-          result.push([previous[0]+t*(next[0]-previous[0]),previous[1]+t*(next[1]-previous[1])]);
-          length=maxLength;break;
-        }
-        result.push(next);length+=d;
+  const result=[end];
+  const used=new Set();
+  let length=0,steps=0;
+  let inward=myarahRoadEndpointHeading(points,atStart);
+  while(length<maxLength && steps++<7){
+    const tail=result[result.length-1];
+    const matches=[];
+    for(let index=0;index<candidates.length;index++){
+      const road=candidates[index];
+      if(used.has(index)||road.kind!==chain.kind)continue;
+      for(const endpointIsFirst of [true,false]){
+        const roadEnd=endpointIsFirst?road.coords[0]:road.coords[road.coords.length-1];
+        const gap=myarahRoadDistance(tail,roadEnd);
+        if(gap>1.45)continue;
+        const outward=myarahRoadEndpointHeading(road.coords,endpointIsFirst);
+        const dot=inward[0]*outward[0]+inward[1]*outward[1];
+        if(dot>-.84)continue;
+        matches.push({index,road,endpointIsFirst,gap,dot,
+          score:-dot-gap*.11});
       }
-      if(length>=7)matches.push({coords:result,length});
     }
+    matches.sort((a,b)=>b.score-a.score);
+    // A genuine road junction can have several branches. Don't arbitrarily
+    // connect to one when the outgoing direction is not distinguishable.
+    if(!matches.length || (matches.length>1&&matches[0].score-matches[1].score<.105))break;
+    const match=matches[0];
+    used.add(match.index);
+    const outward=match.endpointIsFirst?match.road.coords:match.road.coords.slice().reverse();
+    let appended=0;
+    for(let i=1;i<outward.length;i++){
+      const previous=result[result.length-1],next=outward[i];
+      const d=myarahRoadDistance(previous,next);
+      if(d<.3)continue;
+      if(length+d>=maxLength){
+        const t=(maxLength-length)/d;
+        result.push([previous[0]+t*(next[0]-previous[0]),previous[1]+t*(next[1]-previous[1])]);
+        length=maxLength;appended++;break;
+      }
+      result.push(next);length+=d;appended++;
+    }
+    if(!appended)break;
+    inward=myarahRoadEndpointHeading(result,false);
   }
-  // Only attach an approach when the continuation is unambiguous.
-  if(matches.length!==1)return [];
-  return matches[0].coords.slice(1);
+  return length>=8?result.slice(1):[];
 }
 function myarahRoadLineLength(coords){
   let total=0;
   for(let i=1;i<coords.length;i++)total+=myarahRoadDistance(coords[i-1],coords[i]);
   return total;
 }
+// Bridge layers can change at an actual shared OSM node (e.g. layer 1 to
+// layer 2). The old renderer drew the two pieces at 4.6 m and 8.7 m and
+// created an obvious vertical gap. Find the *mutual* straight continuation
+// so both meshes agree on a single junction elevation. Never infer these
+// connections from a crossing in the middle of a segment.
+function myarahRoadJunctionHeights(chains){
+  const ends=[];
+  for(let i=0;i<chains.length;i++)for(const atStart of [true,false]){
+    const road=chains[i];
+    ends.push({i,atStart,kind:road.kind,point:atStart?road.coords[0]:road.coords[road.coords.length-1],
+      inward:myarahRoadEndpointHeading(road.coords,atStart),height:road.height});
+  }
+  const best=new Map();
+  for(let a=0;a<ends.length;a++){
+    const source=ends[a],matches=[];
+    for(let b=0;b<ends.length;b++){
+      const target=ends[b];
+      if(a===b||source.i===target.i||source.kind!==target.kind)continue;
+      const gap=myarahRoadDistance(source.point,target.point);
+      if(gap>1.5)continue;
+      const dot=source.inward[0]*target.inward[0]+source.inward[1]*target.inward[1];
+      if(dot>-.78)continue;
+      matches.push({b,score:-dot-gap*.14});
+    }
+    matches.sort((x,y)=>y.score-x.score);
+    if(matches.length && (matches.length===1||matches[0].score-matches[1].score>.11))
+      best.set(a,matches[0].b);
+  }
+  const targets=chains.map(()=>({start:null,end:null,startNormal:null,endNormal:null}));
+  let linked=0,aligned=0;
+  for(const [a,b] of best){
+    if(a>=b||best.get(b)!==a)continue;
+    const left=ends[a],right=ends[b];
+    // The two road centerlines must agree on BOTH the contact height and
+    // the cross-sectional edge direction. Otherwise a visible gap/wedge
+    // remains even though their centers touch at the same geographic node.
+    const forwardLeft=left.atStart?left.inward:left.inward.map(v=>-v);
+    const forwardRight=right.atStart?right.inward:right.inward.map(v=>-v);
+    const sign=forwardLeft[0]*forwardRight[0]+forwardLeft[1]*forwardRight[1]>=0?1:-1;
+    const tx=forwardLeft[0]+sign*forwardRight[0];
+    const ty=forwardLeft[1]+sign*forwardRight[1];
+    const size=Math.hypot(tx,ty);
+    if(size<.5)continue;
+    const normal=[-ty/size,tx/size];
+    targets[left.i][left.atStart?'startNormal':'endNormal']=normal;
+    targets[right.i][right.atStart?'startNormal':'endNormal']=
+      sign>0?normal:normal.map(v=>-v);
+    aligned++;
+    if(Math.abs(left.height-right.height)<.2)continue;
+    // Relative OSM levels are illustrative; a midpoint creates a gradual
+    // ramp without an abrupt 4.1 m step between adjacent bridge sections.
+    const shared=(left.height+right.height)*.5;
+    targets[left.i][left.atStart?'start':'end']=shared;
+    targets[right.i][right.atStart?'start':'end']=shared;
+    linked++;
+  }
+  return {targets,linked,aligned};
+}
 function myarahAttachBridgeApproaches(chains,allFeatures){
   const candidates=myarahRoadApproachCandidates(allFeatures);
-  return chains.map(chain=>{
-    // A bridge continuation at this node means we are still on the same raised
-    // road. A cut tile/OSM way must NOT be mistaken for a ramp entrance.
+  const {targets,linked,aligned}=myarahRoadJunctionHeights(chains);
+  const result=chains.map((chain,index)=>{
+    // A same-height bridge continuation means we're still on a raised deck.
     const front=chain.continuesStart?[]:myarahRoadApproach(chain,candidates,true);
     const back=chain.continuesEnd?[]:myarahRoadApproach(chain,candidates,false);
     const coords=[...front.slice().reverse(),...chain.coords,...back];
+    const frontMeters=front.length?myarahRoadLineLength([chain.coords[0],...front]):0;
+    const backMeters=back.length?myarahRoadLineLength([chain.coords[chain.coords.length-1],...back]):0;
+    // A ground approach wins over an upper-level seam only if we are
+    // genuinely joining ground road. Otherwise don't invent a ramp at a
+    // vector-tile edge or at an unverified split.
+    const startHeight=frontMeters?0:targets[index].start;
+    const endHeight=backMeters?0:targets[index].end;
     return {...chain,coords,
-      approachStartMeters:front.length?myarahRoadLineLength([chain.coords[0],...front]):0,
-      approachEndMeters:back.length?myarahRoadLineLength([chain.coords[chain.coords.length-1],...back]):0,
-      // A missing ground-road continuation is not license to draw a ramp at
-      // an arbitrary vector-tile edge or the junction to another raised way.
+      approachStartMeters:frontMeters,approachEndMeters:backMeters,
+      junctionStartHeight:startHeight,junctionEndHeight:endHeight,
+      junctionStartNormal:frontMeters?null:targets[index].startNormal,
+      junctionEndNormal:backMeters?null:targets[index].endNormal,
       keepStartHigh:chain.continuesStart||chain.tileStart,
       keepEndHigh:chain.continuesEnd||chain.tileEnd,
-      approachStart:front.length>0,approachEnd:back.length>0};
+      approachStart:frontMeters>0,approachEnd:backMeters>0};
   });
+  result.linkedLevels=linked;
+  result.alignedJoins=aligned;
+  return result;
 }
 function myarahRoadBridgeSegments(features,bounds){
   const raw=[],seen=new Set();
@@ -660,13 +744,31 @@ function myarahRoadSmoothstep(t){
 // tapering at every OSM feature end caused different decks to descend into
 // each other at multilayer interchanges, creating overlapping white fans.
 function myarahRoadSurfaceHeight(distance,length,maxHeight,approachStart=0,approachEnd=0,
-    keepStartHigh=false,keepEndHigh=false){
+    keepStartHigh=false,keepEndHigh=false,junctionStartHeight=null,junctionEndHeight=null){
   if(!(length>0)||!(maxHeight>0))return 0;
-  const start=approachStart>0?Math.min(length*.49,approachStart):0;
-  const end=approachEnd>0?Math.min(length*.49,approachEnd):0;
-  const rise=start>0?myarahRoadSmoothstep(distance/start):1;
-  const fall=end>0?myarahRoadSmoothstep((length-distance)/end):1;
-  return maxHeight*Math.min(rise,fall);
+  // At a verified ground-road join, the tip must physically meet the flat
+  // basemap road. At a multi-level bridge join, both connected sections use
+  // the SAME midpoint elevation and grade toward their nominal level.
+  const startTarget=approachStart>0?0:
+    Number.isFinite(junctionStartHeight)?junctionStartHeight:maxHeight;
+  const endTarget=approachEnd>0?0:
+    Number.isFinite(junctionEndHeight)?junctionEndHeight:maxHeight;
+  // Spread short approaches over the first portion of the bridge too.
+  // A tiny mapped ground piece must not imply a steep vertical step.
+  const startDist=Math.abs(startTarget-maxHeight)<.01?0:
+    Math.min(length*.90,Math.max(approachStart>0?approachStart+24:0,
+      Math.abs(startTarget-maxHeight)*15,28));
+  const endDist=Math.abs(endTarget-maxHeight)<.01?0:
+    Math.min(length*.90,Math.max(approachEnd>0?approachEnd+24:0,
+      Math.abs(endTarget-maxHeight)*15,28));
+  const fromStart=startDist?1-myarahRoadSmoothstep(distance/startDist):0;
+  const fromEnd=endDist?1-myarahRoadSmoothstep((length-distance)/endDist):0;
+  // A short bridge between two junctions cannot have two full-length grade
+  // transitions. Blend them without overshooting either endpoint height.
+  const weight=Math.max(1,fromStart+fromEnd);
+  const result=maxHeight+(startTarget-maxHeight)*fromStart/weight+
+    (endTarget-maxHeight)*fromEnd/weight;
+  return Math.max(0,result);
 }
 // Preserve every mapped bend vertex before adding interpolated samples.
 // The previous equal-distance interpolation smoothed past sharp vertices,
@@ -919,6 +1021,18 @@ function myarahBuildRoadRibbon(chains,routeSegments){
     if(!sample){skipped++;continue;}
     const {samples,total,mx,my}=sample;
     const normals=samples.map((_,i)=>myarahRoadRibbonNormal(samples,i));
+    // Match road-edge directions across verified contiguous source segments.
+    // Ground ramps already contain the joining road geometry, so their end
+    // normals are computed from the complete approach instead.
+    if(normals[0] && chain.junctionStartNormal && !chain.approachStartMeters){
+      const [nx,ny]=chain.junctionStartNormal;
+      normals[0]={nx,ny,scale:1};
+    }
+    const lastNormal=normals.length-1;
+    if(normals[lastNormal] && chain.junctionEndNormal && !chain.approachEndMeters){
+      const [nx,ny]=chain.junctionEndNormal;
+      normals[lastNormal]={nx,ny,scale:1};
+    }
     if(!myarahRoadSafeRibbon(samples,normals,chain.width)){skipped++;continue;}
     if(myarahRoadSameLevelCrossing(chain,accepted)){
       skipped++;collisions++;continue;
@@ -931,7 +1045,8 @@ function myarahBuildRoadRibbon(chains,routeSegments){
       const nx=normal.nx*normal.scale,ny=normal.ny*normal.scale;
       const elevation=.018+myarahRoadSurfaceHeight(p.distance,total,chain.height,
         chain.approachStartMeters||0,chain.approachEndMeters||0,
-        Boolean(chain.keepStartHigh),Boolean(chain.keepEndHigh));
+        Boolean(chain.keepStartHigh),Boolean(chain.keepEndHigh),
+        chain.junctionStartHeight,chain.junctionEndHeight);
       const coord=(side,offset)=>({x:(p.x+nx*offset*side)/mx,y:(p.y+ny*offset*side)/my});
       const half=chain.width*.5;
       const l=coord(1,half),r=coord(-1,half);
@@ -1176,7 +1291,11 @@ function myarahRefreshRoadLevels(){
   const bridged=myarahAttachBridgeApproaches(chains,tiles);
   const signature=bridged.map(c=>{
     const a=c.coords[0],b=c.coords[c.coords.length-1];
-    return [c.kind,c.height,c.coords.length,...a.map(n=>n.toFixed(5)),...b.map(n=>n.toFixed(5))].join(':');
+    const mid=c.coords[Math.floor(c.coords.length/2)];
+    return [c.kind,c.height,c.coords.length,c.approachStartMeters,c.approachEndMeters,
+      c.junctionStartHeight??'',c.junctionEndHeight??'',
+      ...a.map(n=>n.toFixed(6)),...mid.map(n=>n.toFixed(6)),
+      ...b.map(n=>n.toFixed(6))].join(':');
   }).sort().join('|')+(visibleRoute.length?':route'+routeSelected:'');
   if(!myarahRoadSurfaceDirty&&signature===myarahRoadSurfaceSignature)return;
   const built=myarahBuildRoadRibbon(bridged,visibleRoute);
@@ -1197,6 +1316,8 @@ function myarahRefreshRoadLevels(){
     ' · source road sections: '+chains.length+
     ' · elevated: '+built.rendered+
     ' · road-linked ramps: '+bridged.filter(r=>r.approachStart||r.approachEnd).length+
+    ' · level joins: '+(bridged.linkedLevels||0)+
+    ' · aligned joins: '+(bridged.alignedJoins||0)+
     ' · unsafe surfaces blocked: '+built.skipped+
     ' · same-level crossings: '+built.collisions+
     ' · overlapping edges suppressed: '+built.overlapSections+
