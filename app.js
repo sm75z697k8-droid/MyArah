@@ -276,7 +276,10 @@ function add3DBuildings() {
   if (map.getLayer('myarah-3d-buildings')) return;
   map.addSource('myarah-building-data', {
     type: 'vector',
-    url: 'https://tiles.openfreemap.org/planet',
+    // OpenFreeMap TileJSON requires a version segment; /planet alone is not
+    // the documented tileset endpoint. Prefer the already-loaded basemap
+    // vector source for roads, but keep this shared source for 3D buildings.
+    url: 'https://tiles.openfreemap.org/planet/latest',
     attribution: '© <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>'
   });
   // Buildings should never cover the basemap's road/place labels. Put the
@@ -588,17 +591,59 @@ function myarahBuildNativeRoadRamps(chains,routeSegments){
   }
   return {data:{type:'FeatureCollection',features},bridgeCount,routeCount};
 }
+// A 3D building source alone is not a reliable way to obtain road features:
+// the style may load its transportation tiles through a *different* vector
+// source. Read from that already-visible basemap source first. Only use our
+// dedicated building source as a fallback. This also avoids duplicate tile
+// downloads in the normal case.
+function myarahRoadSourceCandidates(){
+  const style=map.getStyle();
+  const sources=style?.sources||{};
+  const choices=new Set();
+  for(const layer of style?.layers||[]){
+    if(layer['source-layer']==='transportation'&&layer.source&&
+        sources[layer.source]?.type==='vector'&&map.getSource(layer.source)){
+      choices.add(layer.source);
+    }
+  }
+  // Styles occasionally rename their road layers: include other loaded
+  // vector sources as fallbacks, without querying our own GeoJSON ramp data.
+  for(const [id,source] of Object.entries(sources)){
+    if(source?.type==='vector'&&id!=='myarah-building-data'&&map.getSource(id)){
+      choices.add(id);
+    }
+  }
+  if(map.getSource('myarah-building-data'))choices.add('myarah-building-data');
+  return [...choices];
+}
+function myarahReadRoadTileFeatures(){
+  const candidates=myarahRoadSourceCandidates();
+  const attempts=[];
+  for(const id of candidates){
+    let loaded=false;
+    try{loaded=map.isSourceLoaded(id);}catch(_){}
+    try{
+      const features=map.querySourceFeatures(id,{sourceLayer:'transportation'});
+      attempts.push(id+':'+(Array.isArray(features)?features.length:0)+(loaded?'':' (loading)'));
+      if(Array.isArray(features)&&features.length){
+        return {features,source:id,attempts};
+      }
+    }catch(error){
+      attempts.push(id+':error '+String(error?.message||error).slice(0,72));
+    }
+  }
+  return {features:[],source:'none',attempts};
+}
 function myarahRoadLevelShouldDraw(){
   return tilted&&!document.hidden&&map.getZoom()>=MYARAH_ROAD_LEVEL_MIN_ZOOM&&
-    Boolean(map.getSource(MYARAH_ROAD_LEVEL_SOURCE))&&Boolean(map.getSource('myarah-building-data'));
+    Boolean(map.getSource(MYARAH_ROAD_LEVEL_SOURCE))&&
+    myarahRoadSourceCandidates().length>0;
 }
 function myarahRefreshRoadLevels(){
   myarahRoadSurfaceTimer=null;
   if(!myarahRoadLevelShouldDraw())return;
-  let tiles;
-  try{tiles=map.querySourceFeatures('myarah-building-data',{sourceLayer:'transportation'});}
-  catch(error){myarahRoadDebugStatus('3D road tiles unavailable: '+(error?.message||'unknown error'));return;}
-  if(!Array.isArray(tiles))return;
+  const roads=myarahReadRoadTileFeatures();
+  const tiles=roads.features;
   const bounds=map.getBounds();
   const chains=myarahRoadBridgeSegments(tiles,bounds);
   const route=typeof routeOptions!=='undefined'?routeOptions[routeSelected]?.coordinates:null;
@@ -607,6 +652,8 @@ function myarahRefreshRoadLevels(){
     const a=c.coords[0],b=c.coords[c.coords.length-1];
     return [c.kind,c.height,c.coords.length,...a.map(n=>n.toFixed(5)),...b.map(n=>n.toFixed(5))].join(':');
   }).sort().join('|')+(visibleRoute.length?':route'+routeSelected:'');
+  // Diagnostic refreshes still run if the feature count has not changed,
+  // but do not rebuild identical geometry on every map idle.
   if(!myarahRoadSurfaceDirty&&signature===myarahRoadSurfaceSignature)return;
   const built=myarahBuildNativeRoadRamps(chains,visibleRoute);
   // Keep the flat basemap road data intact. The raised deck is a thin overlay,
@@ -616,10 +663,11 @@ function myarahRefreshRoadLevels(){
   myarahRoadSurfaceDirty=false;
   myarahRoadLastCount=built.data.features.length;
   myarahRoadDebugStatus('3D ramps · zoom '+map.getZoom().toFixed(1)+
-    ' · tile features: '+tiles.length+' · mapped bridges: '+chains.length+
+    ' · source: '+roads.source+' · tile features: '+tiles.length+
+    ' · mapped bridges: '+chains.length+
     ' · visible ramps: '+built.bridgeCount+' · pieces: '+myarahRoadLastCount+
     (built.data.features.length>=MYARAH_ROAD_PIECE_LIMIT?' · render limit':'')+
-    (map.isSourceLoaded('myarah-building-data')?'':' · loading…'));
+    (tiles.length?'':' · sources checked: '+(roads.attempts.join(', ')||'none')));
 }
 function myarahQueueRoadLevels(force=false){
   if(force)myarahRoadSurfaceDirty=true;
@@ -680,7 +728,9 @@ map.on('style.load',myarahInstallRoadLevels);
 map.on('idle',()=>{if(myarahRoadSurfaceDirty)myarahQueueRoadLevels();});
 map.on('moveend',()=>myarahQueueRoadLevels());
 map.on('sourcedata',event=>{
-  if(event.sourceId==='myarah-building-data'&&event.isSourceLoaded&&tilted){
+  if(tilted&&event.isSourceLoaded&&
+      event.sourceId!==MYARAH_ROAD_LEVEL_SOURCE&&
+      myarahRoadSourceCandidates().includes(event.sourceId)){
     myarahRoadSurfaceDirty=true;
     myarahQueueRoadLevels();
   }

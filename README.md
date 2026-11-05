@@ -1,3 +1,17 @@
+# MyArah — 3D Road Data Source Repair (November 2026)
+
+**What the iPhone diagnostic revealed:** At zoom 17.6, the prior build reported 0 transportation tile features and therefore generated 0 bridge pieces. This does **not** prove that roads are missing from OpenStreetMap; it means the selected vector source did not return transportation features.
+
+**Changes made:**
+- The optional 3D building source now uses OpenFreeMap's documented TileJSON endpoint `https://tiles.openfreemap.org/planet/latest`, rather than `/planet`.
+- 3D bridges now query transportation features from the *actual basemap vector source* first, then other available vector sources as fallbacks, rather than only querying the separate building source.
+- The `?debug3d=1` overlay now shows which source supplied the road features and how many features each attempted source returned when all are empty.
+- Checks for new vector tiles can retrigger 3D ramp generation. No changes to route calculations, traffic, GPS, navigation camera, lane guidance, voice, or Liquid Glass.
+
+**To test:** Upload `app.js`, `index.html` (for cache refresh), and optionally this README. Reopen MyArah at the same road location, switch to 3D, zoom to ~17, and add `?debug3d=1` to the URL. Look for `tile features: > 0` with a source ID. If features are found but `mapped bridges: 0`, it indicates that visible tile data is not tagged as bridges at that location, and a different data strategy may be needed. This update fixes source selection; it does not guarantee accurate road elevation or that every bridge is mapped.
+
+---
+
 # MyArah — 3D Roads Visible Refined (Latest Repair)
 
 **Latest version:** The custom WebGL bridge shader has been replaced with native MapLibre `fill-extrusion` rendering using thin, adjoining, height-stepped strips. This repair targets the problem where the previous road surface rendered nothing on iPhone. Switch to 3D and zoom close to a mapped flyover. Use `?debug3d=1` on your GitHub Pages URL to inspect bridge counts. The road heights and slopes remain illustrative, not measured.
