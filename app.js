@@ -319,6 +319,8 @@ map.on('style.load', add3DBuildings);
 const MYARAH_ROAD_LEVEL_SOURCE='myarah-3d-road-levels-source';
 const MYARAH_ROAD_LEVEL_LAYERS=[
   'myarah-3d-road-shadow',
+  'myarah-3d-road-supports',
+  'myarah-3d-road-abutments',
   'myarah-3d-road-decks',
   'myarah-3d-road-route'
 ];
@@ -352,11 +354,14 @@ function myarahRoadDeckHeight(properties){
   const bridge=properties.brunnel==='bridge';
   if(!bridge && !(Number.isFinite(layer)&&layer>0))return 0;
   const level=Number.isFinite(layer)&&layer>0?Math.min(4,Math.max(1,Math.round(layer))):1;
-  // OSM layer is relative stacking order, NOT metres. Nominal 5 m per level;
-  // no surveyed clearance, slope or exact deck height is implied.
-  // Deliberately exaggerate the illustration slightly so the stacking
-  // reads on phone displays; these numbers are NOT measured road heights.
-  return 7.5+(level-1)*5.8;
+  // OSM layer is relative stacking order, NOT metres. Use a gentler visual
+  // clearance so bridges read as elevated without feeling like floating slabs.
+  return 5.2+(level-1)*3.9;
+}
+function myarahRoadDeckBase(height){
+  if(!(height>0))return 0;
+  // Deck underside / clearance above the lower road.
+  return Math.max(2.4,height-1.05);
 }
 function myarahRoadDeckWidth(properties){
   const kind=String(properties?.class||'').toLowerCase();
@@ -370,6 +375,24 @@ function myarahRoadDeckWidth(properties){
 function myarahRoadLevelPolygon(coords,widthMeters){
   if(!Array.isArray(coords)||coords.length<2||coords.length>320 ||
       !(widthMeters>0))return null;
+  const projected=myarahProjectRoadPoints(coords);
+  if(!projected)return null;
+  return myarahRoadPolygonFromProjected(projected.points,projected.mx,projected.my,widthMeters);
+}
+function myarahRoadLevelSegments(feature){
+  const geometry=feature?.geometry;
+  if(geometry?.type==='LineString')return [geometry.coordinates];
+  if(geometry?.type==='MultiLineString')return geometry.coordinates;
+  return [];
+}
+function myarahRoadLevelNearView(coords,bounds){
+  const extra=.002;
+  return coords.some(point=>point[0]>=bounds.getWest()-extra &&
+    point[0]<=bounds.getEast()+extra &&point[1]>=bounds.getSouth()-extra &&
+    point[1]<=bounds.getNorth()+extra);
+}
+function myarahProjectRoadPoints(coords){
+  if(!Array.isArray(coords)||coords.length<2)return null;
   const latitude=coords.reduce((sum,point)=>sum+(Number(point?.[1])||0),0)/coords.length;
   const mx=111320*Math.max(.1,Math.cos(latitude*Math.PI/180)),my=110540;
   const points=[];
@@ -380,6 +403,10 @@ function myarahRoadLevelPolygon(coords,widthMeters){
         next[1]-points[points.length-1][1])>=.55)points.push(next);
   }
   if(points.length<2)return null;
+  return {points,mx,my};
+}
+function myarahRoadPolygonFromProjected(points,mx,my,widthMeters){
+  if(!Array.isArray(points)||points.length<2||!(widthMeters>0))return null;
   const left=[],right=[],half=widthMeters/2;
   for(let i=0;i<points.length;i++){
     const a=points[Math.max(0,i-1)],b=points[i],c=points[Math.min(points.length-1,i+1)];
@@ -400,24 +427,63 @@ function myarahRoadLevelPolygon(coords,widthMeters){
   }
   const ring=[...left,...right.reverse(),left[0]];
   if(!ring.every(point=>point.every(Number.isFinite)))return null;
-  // GeoJSON outer rings are counterclockwise. Reversing the complete closed
-  // ring avoids inverted surfaces if the source centreline direction changes.
   let area=0;
   for(let i=1;i<ring.length;i++)area+=ring[i-1][0]*ring[i][1]-ring[i][0]*ring[i-1][1];
   if(area<0)ring.reverse();
   return ring;
 }
-function myarahRoadLevelSegments(feature){
-  const geometry=feature?.geometry;
-  if(geometry?.type==='LineString')return [geometry.coordinates];
-  if(geometry?.type==='MultiLineString')return geometry.coordinates;
-  return [];
+function myarahRectangleRing(center,direction,halfLength,halfWidth,mx,my){
+  const dirLen=Math.hypot(direction[0],direction[1])||1;
+  const ux=direction[0]/dirLen,uy=direction[1]/dirLen;
+  const nx=-uy,ny=ux;
+  const corners=[
+    [center[0]-ux*halfLength+nx*halfWidth,center[1]-uy*halfLength+ny*halfWidth],
+    [center[0]+ux*halfLength+nx*halfWidth,center[1]+uy*halfLength+ny*halfWidth],
+    [center[0]+ux*halfLength-nx*halfWidth,center[1]+uy*halfLength-ny*halfWidth],
+    [center[0]-ux*halfLength-nx*halfWidth,center[1]-uy*halfLength-ny*halfWidth]
+  ].map(point=>[point[0]/mx,point[1]/my]);
+  return [...corners,corners[0]];
 }
-function myarahRoadLevelNearView(coords,bounds){
-  const extra=.002;
-  return coords.some(point=>point[0]>=bounds.getWest()-extra &&
-    point[0]<=bounds.getEast()+extra &&point[1]>=bounds.getSouth()-extra &&
-    point[1]<=bounds.getNorth()+extra);
+function myarahRoadSupportFeatures(points,mx,my,widthMeters,deckBase){
+  const features=[];
+  if(points.length<2||!(deckBase>2))return features;
+  let total=0;const cumulative=[0];
+  for(let i=1;i<points.length;i++){
+    total+=Math.hypot(points[i][0]-points[i-1][0],points[i][1]-points[i-1][1]);
+    cumulative.push(total);
+  }
+  if(total<26)return features;
+  const spacing=Math.max(26,Math.min(44,total/3));
+  const startAt=Math.min(18,total*.2),endAt=Math.max(total-startAt,startAt);
+  for(let dist=startAt;dist<endAt;dist+=spacing){
+    let index=1;
+    while(index<cumulative.length&&cumulative[index]<dist)index++;
+    const prev=points[Math.max(0,index-1)],next=points[Math.min(points.length-1,index)];
+    const seg=Math.max(.001,cumulative[index]-cumulative[index-1]);
+    const t=Math.max(0,Math.min(1,(dist-cumulative[index-1])/seg));
+    const center=[prev[0]+(next[0]-prev[0])*t,prev[1]+(next[1]-prev[1])*t];
+    const direction=[next[0]-prev[0],next[1]-prev[1]];
+    const ring=myarahRectangleRing(center,direction,1.05,Math.max(1.3,Math.min(2.2,widthMeters*.16)),mx,my);
+    features.push({type:'Feature',geometry:{type:'Polygon',coordinates:[ring]},
+      properties:{kind:'support',height:deckBase-.12,base:0,raisedRoute:0}});
+  }
+  return features;
+}
+function myarahRoadAbutmentFeatures(points,mx,my,widthMeters,deckBase){
+  const features=[];
+  if(points.length<2||!(deckBase>2.2))return features;
+  const halfLength=Math.max(5.5,Math.min(9.5,widthMeters*.85));
+  const halfWidth=Math.max(2.6,widthMeters*.48);
+  const pairs=[
+    {center:points[0],direction:[points[1][0]-points[0][0],points[1][1]-points[0][1]]},
+    {center:points[points.length-1],direction:[points[points.length-1][0]-points[points.length-2][0],points[points.length-1][1]-points[points.length-2][1]]}
+  ];
+  for(const pair of pairs){
+    const ring=myarahRectangleRing(pair.center,pair.direction,halfLength,halfWidth,mx,my);
+    features.push({type:'Feature',geometry:{type:'Polygon',coordinates:[ring]},
+      properties:{kind:'abutment',height:Math.max(1.4,deckBase*.72),base:0,raisedRoute:0}});
+  }
+  return features;
 }
 // Only visually highlight a raised route where the centreline is compatible
 // with a TomTom route section at several points and the bearing agrees.
@@ -478,8 +544,6 @@ function myarahBuildRoadLevelGeojson(features,bounds,route){
     for(const line of myarahRoadLevelSegments(feature)){
       if(!Array.isArray(line)||line.length<2||!myarahRoadLevelNearView(line,bounds))continue;
       const begin=line[0],end=line[line.length-1];
-      // querySourceFeatures returns tile-edge duplicates; suppress exact copies
-      // without merging distinct roadways/ramps into invented connections.
       const mid=line[Math.floor(line.length/2)];
       const key=[feature.properties?.class,feature.properties?.layer,
         feature.properties?.brunnel,line.length,
@@ -488,15 +552,20 @@ function myarahBuildRoadLevelGeojson(features,bounds,route){
         ...end.map(value=>Number(value).toFixed(5))].join(':');
       if(seen.has(key))continue;
       seen.add(key);
-      const polygon=myarahRoadLevelPolygon(line,width);
+      const projected=myarahProjectRoadPoints(line);
+      if(!projected)continue;
+      const polygon=myarahRoadPolygonFromProjected(projected.points,projected.mx,projected.my,width);
       if(!polygon)continue;
       const routeMatch=myarahRoadLevelOnRoute(line,visibleRoute);
+      const deckBase=myarahRoadDeckBase(height);
       collection.push({type:'Feature',geometry:{type:'Polygon',coordinates:[polygon]},
-        properties:{height,base:height-1.15,raisedRoute:routeMatch?1:0}});
+        properties:{kind:'deck',height,base:deckBase,raisedRoute:routeMatch?1:0}});
+      for(const extra of myarahRoadSupportFeatures(projected.points,projected.mx,projected.my,width,deckBase))collection.push(extra);
+      for(const extra of myarahRoadAbutmentFeatures(projected.points,projected.mx,projected.my,width,deckBase))collection.push(extra);
       signature.push(key+(routeMatch?'+':''));
-      if(collection.length>=MYARAH_ROAD_LEVEL_LIMIT)break;
+      if(collection.length>=MYARAH_ROAD_LEVEL_LIMIT*4)break;
     }
-    if(collection.length>=MYARAH_ROAD_LEVEL_LIMIT)break;
+    if(collection.length>=MYARAH_ROAD_LEVEL_LIMIT*4)break;
   }
   return {data:{type:'FeatureCollection',features:collection},signature:signature.sort().join('|')};
 }
@@ -520,7 +589,7 @@ function myarahRefreshRoadLevels(){
   const loaded=map.isSourceLoaded('myarah-building-data');
   myarahRoadDebugStatus('3D roads · zoom '+map.getZoom().toFixed(1)+
     ' · tile features: '+tiles.length+' · tagged bridges: '+mappedBridges+
-    ' · raised decks: '+next.data.features.length+
+    ' · generated pieces: '+next.data.features.length+
     (loaded?'':' · loading tiles…'));
   if(next.signature===myarahRoadLevelSignature&&!myarahRoadLevelDirty)return;
   myarahRoadLevelSignature=next.signature;
@@ -572,32 +641,54 @@ function myarahInstallRoadLevels(){
       'line-dasharray':[2.5,1.7]
     }
   },firstLabel);
-  const base={type:'fill',source:MYARAH_ROAD_LEVEL_SOURCE,minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
-    layout:{visibility:tilted?'visible':'none'},
-    paint:{'fill-color':dark?'#08121c':'#526678','fill-opacity':dark?.24:.17}};
   if(!map.getLayer(MYARAH_ROAD_LEVEL_LAYERS[0]))map.addLayer({
-    ...base,id:MYARAH_ROAD_LEVEL_LAYERS[0]
+    id:MYARAH_ROAD_LEVEL_LAYERS[0],
+    type:'fill',source:MYARAH_ROAD_LEVEL_SOURCE,minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
+    filter:['==',['get','kind'],'deck'],
+    layout:{visibility:tilted?'visible':'none'},
+    paint:{'fill-color':dark?'#08121c':'#405565','fill-opacity':dark?.30:.24}
   },firstLabel);
   if(!map.getLayer(MYARAH_ROAD_LEVEL_LAYERS[1]))map.addLayer({
     id:MYARAH_ROAD_LEVEL_LAYERS[1],type:'fill-extrusion',
     source:MYARAH_ROAD_LEVEL_SOURCE,minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
+    filter:['==',['get','kind'],'support'],
+    layout:{visibility:tilted?'visible':'none'},
+    paint:{'fill-extrusion-color':dark?'#637789':'#c5d0d8',
+      'fill-extrusion-opacity':dark?.82:.84,
+      'fill-extrusion-height':['get','height'],
+      'fill-extrusion-base':['get','base']}
+  },firstLabel);
+  if(!map.getLayer(MYARAH_ROAD_LEVEL_LAYERS[2]))map.addLayer({
+    id:MYARAH_ROAD_LEVEL_LAYERS[2],type:'fill-extrusion',
+    source:MYARAH_ROAD_LEVEL_SOURCE,minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
+    filter:['==',['get','kind'],'abutment'],
+    layout:{visibility:tilted?'visible':'none'},
+    paint:{'fill-extrusion-color':dark?'#6f8799':'#d6dfe6',
+      'fill-extrusion-opacity':dark?.88:.90,
+      'fill-extrusion-height':['get','height'],
+      'fill-extrusion-base':['get','base']}
+  },firstLabel);
+  if(!map.getLayer(MYARAH_ROAD_LEVEL_LAYERS[3]))map.addLayer({
+    id:MYARAH_ROAD_LEVEL_LAYERS[3],type:'fill-extrusion',
+    source:MYARAH_ROAD_LEVEL_SOURCE,minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
+    filter:['==',['get','kind'],'deck'],
     layout:{visibility:tilted?'visible':'none'},
     paint:{'fill-extrusion-color':dark?'#7c96aa':'#e4ebef',
-      'fill-extrusion-opacity':dark?.93:.96,
+      'fill-extrusion-opacity':dark?.95:.97,
       'fill-extrusion-vertical-gradient':true,
       'fill-extrusion-height':['get','height'],
       'fill-extrusion-base':['get','base']}
   },firstLabel);
   // Repaint only the bridge portions that confidently align with the chosen
   // TomTom route, to avoid showing the route underneath its own bridge deck.
-  if(!map.getLayer(MYARAH_ROAD_LEVEL_LAYERS[2]))map.addLayer({
-    id:MYARAH_ROAD_LEVEL_LAYERS[2],type:'fill-extrusion',
+  if(!map.getLayer(MYARAH_ROAD_LEVEL_LAYERS[4]))map.addLayer({
+    id:MYARAH_ROAD_LEVEL_LAYERS[4],type:'fill-extrusion',
     source:MYARAH_ROAD_LEVEL_SOURCE,minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
-    filter:['==',['get','raisedRoute'],1],
+    filter:['all',['==',['get','kind'],'deck'],['==',['get','raisedRoute'],1]],
     layout:{visibility:tilted?'visible':'none'},
     paint:{'fill-extrusion-color':dark?'#4fa9ff':'#187ed9',
       'fill-extrusion-opacity':1,
-      'fill-extrusion-height':['+',['get','height'],.22],
+      'fill-extrusion-height':['+',['get','height'],.14],
       'fill-extrusion-base':['get','height']}
   },firstLabel);
   myarahQueueRoadLevels(true);
@@ -1051,7 +1142,7 @@ $('tilt').addEventListener('click',()=>{
   $('tilt').classList.toggle('is-active',tilted);
   $('tilt').setAttribute('aria-pressed',String(tilted));
   $('tilt').setAttribute('aria-label',tilted?'Switch to 2D map':'Switch to 3D map');
-  toast(tilted?'3D mode · mapped bridges highlighted; heights illustrative':'2D map');
+  toast(tilted?'3D mode · elevated roads anchored; heights illustrative':'2D map');
 });
 // Compass button behavior is managed by the cardinal dial module below.
 // iPhone-style facing-direction cone. This uses a real compass reading when

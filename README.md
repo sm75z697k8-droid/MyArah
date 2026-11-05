@@ -837,3 +837,10 @@ The initial elevated-road experiment was too difficult to verify: a missing brid
 - The debug overlay is **off by default**, and neither 2D road styling nor routing/lane matching uses these estimated heights. Only use the experimental 3D layer as a visual guide; real road signs take priority.
 
 We could not confirm live vector tiles or visual performance on a physical iPhone in this environment. Please report the debug counts from a test flyover rather than assuming any location is supported.
+
+
+## 3D bridge anchoring refined
+- Bridge decks now use gentler elevation so they do not feel like floating slabs.
+- Added support columns and end abutments to visually connect elevated roads back to the ground.
+- Strengthened the deck shadow and kept the route highlight only on bridge sections that confidently match the chosen TomTom route.
+- This remains illustrative 3D rendering based on OSM bridge/layer tags, not surveyed bridge clearance.
