@@ -958,3 +958,11 @@ This conservative rendering revision addresses jagged white triangles at complex
 - The opt-in `?debug3d=1` view now has a **Save road data** button to export only public OSM road geometry near the displayed map. The export intentionally excludes GPS position, routes, search history and keys. If any spikes remain, send the `myarah-3d-road-data.geojson` file so those exact road shapes can be reproduced and tested; screenshots alone cannot reveal the source geometry.
 - No changes to 2D navigation, routing, GPS, lane guidance, English voice, tolls or Liquid Glass.
 - 3D appearance must still be tested in your iPhone browser: we cannot verify live tile rendering in this container.
+
+
+## 3D interchange overlap repair (Nov 2026)
+- Diagnosed against the exported road geometry from the Johor Bahru E14/J5 interchange; previous surface-safety checks missed overlaps **between different mapped bridge strips**.
+- Added spatial overlap handling to suppress redundant road walls, edge strips and shadows when two decks occupy nearly the same place and estimated elevation; the top roadway remains continuous.
+- Stops automatically inventing a descent at a tile/OSM way boundary: only confirmed connected ground-road geometry creates a ramp grade.
+- Narrows illustrative bridge ribbons slightly, reducing overlap between neighboring flyover carriageways.
+- `?debug3d=1` now displays how many overlapping edge sections were suppressed. This is still approximate 3D visualization, not surveyed road altitudes.

@@ -328,9 +328,9 @@ const MYARAH_ROAD_LEVEL_MIN_ZOOM=15.35;
 const MYARAH_ROAD_LEVEL_LIMIT=105;
 const MYARAH_ROAD_CLASSES=['motorway','motorway_link','trunk','trunk_link','primary',
   'primary_link','secondary','secondary_link','tertiary','tertiary_link','minor','service'];
-const MYARAH_ROAD_WIDTHS={motorway:11.4,motorway_link:6.5,trunk:10.4,trunk_link:6.3,
-  primary:9,primary_link:6.1,secondary:8,secondary_link:5.8,
-  tertiary:7,tertiary_link:5.3,minor:5.8,service:4.8};
+const MYARAH_ROAD_WIDTHS={motorway:9.1,motorway_link:5.8,trunk:8.6,trunk_link:5.6,
+  primary:7.5,primary_link:5.3,secondary:6.8,secondary_link:5.1,
+  tertiary:6.1,tertiary_link:4.8,minor:5.0,service:4.1};
 let myarahRoadDebugNode=null;
 let myarahRoadDebugTextNode=null;
 let myarahRoadLastTileSample=[];
@@ -555,7 +555,7 @@ function myarahRoadEndpointHeading(points,atStart){
   const length=Math.hypot(...meters);
   return length>0?meters.map(v=>v/length):[0,0];
 }
-function myarahRoadApproach(chain,candidates,atStart,maxLength=33){
+function myarahRoadApproach(chain,candidates,atStart,maxLength=65){
   const points=chain.coords;
   const end=atStart?points[0]:points[points.length-1];
   const intoBridge=myarahRoadEndpointHeading(points,atStart);
@@ -655,18 +655,15 @@ function myarahRoadSmoothstep(t){
 // The ground-road approach carries the grade into the flyover; if OSM only
 // maps the bridge itself, use a short gentle transition rather than a tall
 // rectangular end. Heights remain illustrative, never road-matching data.
+// A bridge tile fragment is not a real bridge entrance. Grade the road ONLY
+// where we have a verified, connected ground-road approach. Arbitrarily
+// tapering at every OSM feature end caused different decks to descend into
+// each other at multilayer interchanges, creating overlapping white fans.
 function myarahRoadSurfaceHeight(distance,length,maxHeight,approachStart=0,approachEnd=0,
     keepStartHigh=false,keepEndHigh=false){
   if(!(length>0)||!(maxHeight>0))return 0;
-  // On confirmed connecting ground roads, use the entire available approach
-  // (up to 33 m) for a believable grade; preserve the deck through tile seams.
-  // If no adjoining ground geometry exists, taper at a real exposed bridge end
-  // but NEVER invent a drop at an interior OSM/tile break.
-  const fallback=Math.min(18,length*.28);
-  const start=approachStart>0?Math.min(length*.48,approachStart):
-    keepStartHigh?0:fallback;
-  const end=approachEnd>0?Math.min(length*.48,approachEnd):
-    keepEndHigh?0:fallback;
+  const start=approachStart>0?Math.min(length*.49,approachStart):0;
+  const end=approachEnd>0?Math.min(length*.49,approachEnd):0;
   const rise=start>0?myarahRoadSmoothstep(distance/start):1;
   const fall=end>0?myarahRoadSmoothstep((length-distance)/end):1;
   return maxHeight*Math.min(rise,fall);
@@ -858,12 +855,51 @@ function myarahRoadMatchesRoute(coords,segments){
 function myarahRoadAddQuad(target,a,b,c,d){
   target.push(...a,...b,...c,...c,...b,...d);
 }
+// Same-height bridge ribbons overlap at this interchange even when each
+// individual strip passes self-intersection tests. Test the *expanded road*
+// against surfaces already admitted, not just their centerline intersections.
+// A compact spatial index makes the check inexpensive on iPhone hardware.
+function myarahRoadSurfaceOverlapIndex(cellSize=24){
+  const buckets=new Map();
+  const key=(x,y)=>Math.floor(x/cellSize)+':'+Math.floor(y/cellSize);
+  function add(a,b,width){
+    const radius=width*.5+8;
+    const record={a,b,width};
+    const x0=Math.floor((Math.min(a.x,b.x)-radius)/cellSize);
+    const x1=Math.floor((Math.max(a.x,b.x)+radius)/cellSize);
+    const y0=Math.floor((Math.min(a.y,b.y)-radius)/cellSize);
+    const y1=Math.floor((Math.max(a.y,b.y)+radius)/cellSize);
+    for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++){
+      const k=x+':'+y;
+      if(!buckets.has(k))buckets.set(k,[]);
+      buckets.get(k).push(record);
+    }
+  }
+  function covers(p,width){
+    const near=buckets.get(key(p.x,p.y))||[];
+    for(const record of near){
+      const {a,b}=record,dx=b.x-a.x,dy=b.y-a.y,denom=dx*dx+dy*dy;
+      if(denom<.05)continue;
+      const t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/denom));
+      const distance=Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy);
+      // Tolerate edge-to-edge overlap; eliminate only the part where the
+      // road surfaces substantially occupy the same place and height.
+      if(distance>Math.max(1.4,(width+record.width)*.5-1.25))continue;
+      const z=a.z+(b.z-a.z)*t;
+      if(Math.abs(p.z-z)<1.8)return true;
+    }
+    return false;
+  }
+  return {add,covers};
+}
+
 // Batch 5 surfaces into one lightweight WebGL2 custom layer, aligned using
 // MapLibre's own Mercator projection matrix. Unlike fill-extrusions, vertices
 // here can have DIFFERENT elevations, creating a true sloped roadway mesh.
 function myarahBuildRoadRibbon(chains,routeSegments){
   const meshes={shadow:[],wall:[],surface:[],edge:[],route:[]};
-  let anchor=null,rendered=0,triangles=0,skipped=0,collisions=0;
+  let anchor=null,rendered=0,triangles=0,skipped=0,collisions=0,overlapSections=0;
+  const overlapIndex=myarahRoadSurfaceOverlapIndex();
   const accepted=[];
   // Keep the main mapped highway before short adjacent branches when the
   // available tags give two crossing roads the same estimated elevation.
@@ -912,21 +948,41 @@ function myarahBuildRoadRibbon(chains,routeSegments){
         shR:xyz(coord(-1,Math.max(.1,half-1.1)),.055),
         elevation});
     }
+    let visibleQuads=0;
+    const admitted=[];
     for(let i=1;i<mesh.length;i++){
       const a=mesh[i-1],b=mesh[i];
+      const pa=samples[i-1],pb=samples[i];
+      const mid={x:(pa.x+pb.x)*.5,y:(pa.y+pb.y)*.5,
+        z:(a.elevation+b.elevation)*.5};
+      const covered=overlapIndex.covers(mid,chain.width);
+      // Never break a continuous deck into dashed sections. Shared, nearly
+      // coplanar faces can overlap harmlessly when given one flat road color.
       myarahRoadAddQuad(meshes.surface,a.topL,a.topR,b.topL,b.topR);
-      myarahRoadAddQuad(meshes.wall,a.topL,a.bottomL,b.topL,b.bottomL);
-      myarahRoadAddQuad(meshes.wall,a.bottomR,a.topR,b.bottomR,b.topR);
-      myarahRoadAddQuad(meshes.edge,a.topL,a.edgeL,b.topL,b.edgeL);
-      myarahRoadAddQuad(meshes.edge,a.edgeR,a.topR,b.edgeR,b.topR);
+      if(!covered){
+        // The slabs/walls/rails are what formed dark triangular seams at
+        // junctions. Only one road gets those visual details here.
+        myarahRoadAddQuad(meshes.wall,a.topL,a.bottomL,b.topL,b.bottomL);
+        myarahRoadAddQuad(meshes.wall,a.bottomR,a.topR,b.bottomR,b.topR);
+        myarahRoadAddQuad(meshes.edge,a.topL,a.edgeL,b.topL,b.edgeL);
+        myarahRoadAddQuad(meshes.edge,a.edgeR,a.topR,b.edgeR,b.topR);
+        if(a.elevation>2.1&&b.elevation>2.1)
+          myarahRoadAddQuad(meshes.shadow,a.shL,a.shR,b.shL,b.shR);
+      }else overlapSections++;
       if(matched)myarahRoadAddQuad(meshes.route,a.stripeL,a.stripeR,b.stripeL,b.stripeR);
-      if(a.elevation>2.1&&b.elevation>2.1)
-        myarahRoadAddQuad(meshes.shadow,a.shL,a.shR,b.shL,b.shR);
+      // Do not index until this chain finishes: adjacent pieces of the SAME
+      // road necessarily share an edge and must never mask each other.
+      admitted.push([{x:pa.x,y:pa.y,z:a.elevation},
+        {x:pb.x,y:pb.y,z:b.elevation}]);
+      visibleQuads++;
     }
-    rendered++;
+    if(visibleQuads){
+      for(const [a,b] of admitted)overlapIndex.add(a,b,chain.width);
+      rendered++;
+    }else skipped++;
   }
   for(const mesh of Object.values(meshes))triangles+=mesh.length/9;
-  return {meshes,anchor:anchor||{x:0,y:0},rendered,triangles,skipped,collisions};
+  return {meshes,anchor:anchor||{x:0,y:0},rendered,triangles,skipped,collisions,overlapSections};
 }
 function myarahMakeRoadSurfaceLayer(){
   return {
@@ -1003,8 +1059,8 @@ function myarahMakeRoadSurfaceLayer(){
         shadow:[.02,.06,.09,.10],wall:[.34,.42,.48,1],surface:[.51,.60,.67,1],
         edge:[.31,.40,.48,.95],route:[.25,.64,1,.94]
       }:{
-        shadow:[.17,.23,.30,.09],wall:[.72,.78,.83,1],surface:[.95,.962,.970,1],
-        edge:[.68,.75,.80,.83],route:[.08,.47,.84,.94]
+        shadow:[.17,.23,.30,.09],wall:[.71,.77,.81,1],surface:[.91,.935,.950,1],
+        edge:[.76,.81,.85,.79],route:[.08,.47,.84,.94]
       };
       for(const kind of ['shadow','wall','surface','edge','route']){
         if(!this.counts[kind])continue;
@@ -1134,7 +1190,8 @@ function myarahRefreshRoadLevels(){
   // once. If a layer is unavailable or coverage is incomplete, 2D roads stay.
   myarahMaskFlatBridgeLines(Boolean(myarahRoadSurface?.ready&&
     myarahRoadSurface.drawCalls>0 && chains.length>0&&
-    built.skipped===0&&built.rendered===chains.length&&chains.length<MYARAH_ROAD_LEVEL_LIMIT),roads.source);
+    built.skipped===0&&built.rendered===chains.length&&
+    chains.length<MYARAH_ROAD_LEVEL_LIMIT),roads.source);
   myarahRoadDebugStatus('3D roads · zoom '+map.getZoom().toFixed(1)+
     ' · source: '+roads.source+' · tile features: '+tiles.length+
     ' · source road sections: '+chains.length+
@@ -1142,6 +1199,7 @@ function myarahRefreshRoadLevels(){
     ' · road-linked ramps: '+bridged.filter(r=>r.approachStart||r.approachEnd).length+
     ' · unsafe surfaces blocked: '+built.skipped+
     ' · same-level crossings: '+built.collisions+
+    ' · overlapping edges suppressed: '+built.overlapSections+
     ' · triangles: '+built.triangles+
     (myarahRoadSurface?.ready?' · renderer ready':' · renderer unavailable')+
     (myarahRoadSurface?.drawCalls?' · GPU drawing':' · waiting for draw')+
