@@ -1,3 +1,23 @@
+# MyArah — 3D Road Depth & Connections Refined (experimental)
+
+Based on the user's latest 3D Width-Matched Connected project and recorded Johor Bahru road exports. This release prioritizes visual integration and credible geometry, **not** increased illustrative heights or more fake bridge structures.
+
+## Improvements
+- At verified bridge-to-bridge joins, unify the **height, cross-section direction AND width** so the mesh doesn't leave narrow V-shaped openings between surfaces. Class changes are accepted only when roads share an endpoint and have a uniquely straight continuation.
+- Follow the real ground-road centerline for approach ramps and taper from the connecting ground road's estimated width into the elevated road's own width over a larger distance.
+- Validate ribbons using the **actual per-vertex road width profile**, rather than testing only the bridge's nominal width. Reject invalid strips rather than showing spikes.
+- Distinguish the illuminated and shaded faces of the thin road deck, strengthen subtle ground shadows, and provide two-tone shoulder edges. These are visual cues, *not* verified lane markings or bridge engineering details.
+- Preserve overlapping-surface safeguards and the existing MapLibre WebGL2 custom renderer; roads with insufficient source connectivity remain unchanged instead of inventing connections.
+- Remove the accidentally included `app.js.bak` from the shipping ZIP; use versioned asset query strings to avoid stale JavaScript on iPhone browsers.
+
+## Limits and verification
+- Road levels are illustrative. OpenMapTiles/OSM `layer` and `brunnel` represent relative stacking, **not exact altitudes, grades, physical deck widths or lane count**.
+- This build only changes visual 3D road presentation, not lane decisions, GPS road matching, TomTom routing, traffic, tolls or speech.
+- Replay validation uses previous GeoJSON road exports and JavaScript/ZIP checks. Live on-device MapLibre/Chrome-Safari visual rendering remains to be verified on an iPhone. Use `?debug3d=1` to inspect the road counters or export visible source roads.
+- Install on GitHub Pages by replacing `index.html`, `app.js`, `styles.css` and `README.md` in the repository root (no `app.js.bak`).
+
+---
+
 # MyArah — 3D Bridge-to-Road Connections Refined
 
 This revision addresses the visible height gaps between elevated road sections and their connecting roads at the Johor Bahru J5/E14 interchange. It uses the actual public road geometry exported from MyArah by the user to verify the joins. **It does not infer exact engineered elevations or create roads where source mapping is absent.**

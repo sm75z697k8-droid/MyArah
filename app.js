@@ -634,7 +634,8 @@ function myarahRoadJunctionHeights(chains){
   const ends=[];
   for(let i=0;i<chains.length;i++)for(const atStart of [true,false]){
     const road=chains[i];
-    ends.push({i,atStart,kind:road.kind,point:atStart?road.coords[0]:road.coords[road.coords.length-1],
+    ends.push({i,atStart,kind:road.kind,width:road.width,
+      point:atStart?road.coords[0]:road.coords[road.coords.length-1],
       inward:myarahRoadEndpointHeading(road.coords,atStart),height:road.height});
   }
   const best=new Map();
@@ -642,18 +643,23 @@ function myarahRoadJunctionHeights(chains){
     const source=ends[a],matches=[];
     for(let b=0;b<ends.length;b++){
       const target=ends[b];
-      if(a===b||source.i===target.i||source.kind!==target.kind)continue;
+      if(a===b||source.i===target.i||
+          !myarahRoadKindsCompatible(source.kind,target.kind))continue;
       const gap=myarahRoadDistance(source.point,target.point);
       if(gap>1.5)continue;
       const dot=source.inward[0]*target.inward[0]+source.inward[1]*target.inward[1];
-      if(dot>-.78)continue;
-      matches.push({b,score:-dot-gap*.14});
+      // When road classes change, require an especially straight, matched
+      // continuation. Crossing carriageways never share this endpoint test.
+      if(dot>(source.kind===target.kind?-.78:-.91))continue;
+      const widthDifference=Math.abs(source.width-target.width);
+      matches.push({b,score:-dot-gap*.14-widthDifference*.008});
     }
     matches.sort((x,y)=>y.score-x.score);
     if(matches.length && (matches.length===1||matches[0].score-matches[1].score>.11))
       best.set(a,matches[0].b);
   }
-  const targets=chains.map(()=>({start:null,end:null,startNormal:null,endNormal:null}));
+  const targets=chains.map(()=>({start:null,end:null,
+    startNormal:null,endNormal:null,startWidth:null,endWidth:null}));
   let linked=0,aligned=0;
   for(const [a,b] of best){
     if(a>=b||best.get(b)!==a)continue;
@@ -672,6 +678,12 @@ function myarahRoadJunctionHeights(chains){
     targets[left.i][left.atStart?'startNormal':'endNormal']=normal;
     targets[right.i][right.atStart?'startNormal':'endNormal']=
       sign>0?normal:normal.map(v=>-v);
+    // Both ends must have exactly the same physical width at the joining
+    // cross-section, otherwise their side walls form a visible V-shaped seam.
+    // Use a conservative midpoint; widen along each road's own centerline.
+    const joinedWidth=(left.width+right.width)*.5;
+    targets[left.i][left.atStart?'startWidth':'endWidth']=joinedWidth;
+    targets[right.i][right.atStart?'startWidth':'endWidth']=joinedWidth;
     aligned++;
     if(Math.abs(left.height-right.height)<.2)continue;
     // Relative OSM levels are illustrative; a midpoint creates a gradual
@@ -703,6 +715,8 @@ function myarahAttachBridgeApproaches(chains,allFeatures){
       approachStartMeters:frontMeters,approachEndMeters:backMeters,
       approachStartWidth:frontMeters?(frontInfo.width||chain.width):null,
       approachEndWidth:backMeters?(backInfo.width||chain.width):null,
+      junctionStartWidth:frontMeters?null:targets[index].startWidth,
+      junctionEndWidth:backMeters?null:targets[index].endWidth,
       junctionStartHeight:startHeight,junctionEndHeight:endHeight,
       junctionStartNormal:frontMeters?null:targets[index].startNormal,
       junctionEndNormal:backMeters?null:targets[index].endNormal,
@@ -788,20 +802,25 @@ function myarahRoadSurfaceHeight(distance,length,maxHeight,approachStart=0,appro
   return Math.max(0,result);
 }
 function myarahRoadSurfaceWidth(distance,length,maxWidth,approachStart=0,approachEnd=0,
-    approachStartWidth=null,approachEndWidth=null){
+    approachStartWidth=null,approachEndWidth=null,
+    junctionStartWidth=null,junctionEndWidth=null){
   if(!(length>0)||!(maxWidth>0))return maxWidth;
-  const startWidth=Number.isFinite(approachStartWidth)&&approachStartWidth>0?approachStartWidth:maxWidth;
-  const endWidth=Number.isFinite(approachEndWidth)&&approachEndWidth>0?approachEndWidth:maxWidth;
-  const startDist=startWidth===maxWidth?0:
-    Math.min(length*.8,Math.max(approachStart>0?approachStart+22:0,20));
-  const endDist=endWidth===maxWidth?0:
-    Math.min(length*.8,Math.max(approachEnd>0?approachEnd+22:0,20));
-  const fromStart=startDist?1-myarahRoadSmoothstep(distance/startDist):0;
-  const fromEnd=endDist?1-myarahRoadSmoothstep((length-distance)/endDist):0;
-  const weight=Math.max(1,fromStart+fromEnd);
-  const result=maxWidth+(startWidth-maxWidth)*fromStart/weight+
-    (endWidth-maxWidth)*fromEnd/weight;
-  return Math.max(3.6,result);
+  const valid=(n)=>Number.isFinite(n)&&n>2.5;
+  const startWidth=approachStart>0 && valid(approachStartWidth)?approachStartWidth:
+    valid(junctionStartWidth)?junctionStartWidth:maxWidth;
+  const endWidth=approachEnd>0 && valid(approachEndWidth)?approachEndWidth:
+    valid(junctionEndWidth)?junctionEndWidth:maxWidth;
+  // A matching cross-section is not enough: spread the change over a
+  // meaningful length of BOTH the approach and the elevated deck.
+  const widthSpan=(from,approach)=>Math.abs(from-maxWidth)<.02?0:
+    Math.min(length*.75,Math.max(approach>0?approach+24:0,
+      26,Math.abs(from-maxWidth)*18));
+  const startDist=widthSpan(startWidth,approachStart),endDist=widthSpan(endWidth,approachEnd);
+  const tStart=startDist?1-myarahRoadSmoothstep(distance/startDist):0;
+  const tEnd=endDist?1-myarahRoadSmoothstep((length-distance)/endDist):0;
+  const weight=Math.max(1,tStart+tEnd);
+  return Math.max(3.4,maxWidth+(startWidth-maxWidth)*tStart/weight+
+    (endWidth-maxWidth)*tEnd/weight);
 }
 // Preserve every mapped bend vertex before adding interpolated samples.
 // The previous equal-distance interpolation smoothed past sharp vertices,
@@ -858,14 +877,16 @@ function myarahRoadSegmentsIntersect(a,b,c,d){
   const o1=orient(a,b,c),o2=orient(a,b,d),o3=orient(c,d,a),o4=orient(c,d,b);
   return o1*o2<-.000001 && o3*o4<-.000001;
 }
-function myarahRoadSafeRibbon(samples,normals,widthMeters=9){
+function myarahRoadSafeRibbon(samples,normals,widthMeters=9,widths=null){
   if(normals.some(n=>!n)||!(widthMeters>0))return false;
+  if(widths && (widths.length!==samples.length||
+      widths.some(w=>!Number.isFinite(w)||w<=0||w>20)))return false;
   // A safe CENTERLINE can still create a self-overlapping road SURFACE when
   // its sides spread through a tight S-bend. This was not checked previously,
   // allowing long triangular fans and overlapping white patches at junctions.
-  const half=widthMeters*.5;
   const sides=samples.map((p,i)=>{
-    const n=normals[i],dx=n.nx*n.scale*half,dy=n.ny*n.scale*half;
+    const n=normals[i],half=(widths?.[i]??widthMeters)*.5;
+    const dx=n.nx*n.scale*half,dy=n.ny*n.scale*half;
     return {left:{x:p.x+dx,y:p.y+dy},right:{x:p.x-dx,y:p.y-dy}};
   });
   const cross=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
@@ -878,7 +899,8 @@ function myarahRoadSafeRibbon(samples,normals,widthMeters=9){
     // enough area. A flipped or vanishing triangle appears as a giant spike.
     const first=cross(old.left,old.right,now.left);
     const second=cross(now.left,old.right,now.right);
-    const minArea=widthMeters*Math.hypot(b.x-a.x,b.y-a.y)*.12;
+    const avgWidth=widths?(widths[i-1]+widths[i])*.5:widthMeters;
+    const minArea=avgWidth*Math.hypot(b.x-a.x,b.y-a.y)*.12;
     if(!(first>minArea&&second>minArea))return false;
   }
   // Compare actual outer edges as well as the centerline, not centerline
@@ -887,7 +909,7 @@ function myarahRoadSafeRibbon(samples,normals,widthMeters=9){
   // Each sampled link is at most about 8 metres long. A small spatial hash
   // prevents quadratic scanning of unrelated bridge sections during iPhone
   // pans, while still finding side-to-side and centerline intersections.
-  const grid=new Map(),cellSize=Math.max(14,widthMeters*1.6);
+  const grid=new Map(),cellSize=Math.max(14,Math.max(widthMeters,...(widths||[]))*1.6);
   const segments=[];
   for(let i=0;i<samples.length-1;i++){
     const edges=lines.map(l=>[l[i],l[i+1]]);
@@ -1032,7 +1054,7 @@ function myarahRoadSurfaceOverlapIndex(cellSize=24){
 // MapLibre's own Mercator projection matrix. Unlike fill-extrusions, vertices
 // here can have DIFFERENT elevations, creating a true sloped roadway mesh.
 function myarahBuildRoadRibbon(chains,routeSegments){
-  const meshes={shadow:[],wall:[],surface:[],edge:[],route:[]};
+  const meshes={shadow:[],wallShade:[],wallLight:[],surface:[],edgeShade:[],edgeLight:[],route:[]};
   let anchor=null,rendered=0,triangles=0,skipped=0,collisions=0,overlapSections=0;
   const overlapIndex=myarahRoadSurfaceOverlapIndex();
   const accepted=[];
@@ -1066,7 +1088,11 @@ function myarahBuildRoadRibbon(chains,routeSegments){
       const [nx,ny]=chain.junctionEndNormal;
       normals[lastNormal]={nx,ny,scale:1};
     }
-    if(!myarahRoadSafeRibbon(samples,normals,chain.width)){skipped++;continue;}
+    const profile=samples.map(p=>myarahRoadSurfaceWidth(p.distance,total,chain.width,
+      chain.approachStartMeters||0,chain.approachEndMeters||0,
+      chain.approachStartWidth,chain.approachEndWidth,
+      chain.junctionStartWidth,chain.junctionEndWidth));
+    if(!myarahRoadSafeRibbon(samples,normals,chain.width,profile)){skipped++;continue;}
     if(myarahRoadSameLevelCrossing(chain,accepted)){
       skipped++;collisions++;continue;
     }
@@ -1080,24 +1106,22 @@ function myarahBuildRoadRibbon(chains,routeSegments){
         chain.approachStartMeters||0,chain.approachEndMeters||0,
         Boolean(chain.keepStartHigh),Boolean(chain.keepEndHigh),
         chain.junctionStartHeight,chain.junctionEndHeight);
-      const currentWidth=myarahRoadSurfaceWidth(p.distance,total,chain.width,
-        chain.approachStartMeters||0,chain.approachEndMeters||0,
-        chain.approachStartWidth,chain.approachEndWidth);
+      const currentWidth=profile[i];
       const coord=(side,offset)=>({x:(p.x+nx*offset*side)/mx,y:(p.y+ny*offset*side)/my});
       const half=currentWidth*.5;
       const l=coord(1,half),r=coord(-1,half);
-      const edge=Math.min(.19,currentWidth*.026);
+      const edge=Math.min(.34,currentWidth*.047);
       const leftIn=coord(1,half-edge),rightIn=coord(-1,half-edge);
       const topL=xyz(l,elevation),topR=xyz(r,elevation);
-      const wallDepth=Math.min(.27,Math.max(0,(elevation-.018)*.08));
+      const wallDepth=Math.min(.42,Math.max(0,(elevation-.018)*.11));
       const underside=Math.max(.016,elevation-wallDepth);
       mesh.push({topL,topR,bottomL:xyz(l,underside),bottomR:xyz(r,underside),
         edgeL:xyz(leftIn,elevation+.018),edgeR:xyz(rightIn,elevation+.018),
         stripeL:matched?xyz(coord(1,Math.min(1.45,currentWidth*.16)),elevation+.065):null,
         stripeR:matched?xyz(coord(-1,Math.min(1.45,currentWidth*.16)),elevation+.065):null,
-        shL:xyz(coord(1,Math.max(.1,half-1.1)),.055),
-        shR:xyz(coord(-1,Math.max(.1,half-1.1)),.055),
-        elevation});
+        shL:xyz(coord(1,half+1.8),.055),
+        shR:xyz(coord(-1,half+1.8),.055),
+        elevation,width:currentWidth});
     }
     let visibleQuads=0;
     const admitted=[];
@@ -1106,17 +1130,27 @@ function myarahBuildRoadRibbon(chains,routeSegments){
       const pa=samples[i-1],pb=samples[i];
       const mid={x:(pa.x+pb.x)*.5,y:(pa.y+pb.y)*.5,
         z:(a.elevation+b.elevation)*.5};
-      const covered=overlapIndex.covers(mid,chain.width);
+      const sectionWidth=(a.width+b.width)*.5;
+      const covered=overlapIndex.covers(mid,sectionWidth);
       // Never break a continuous deck into dashed sections. Shared, nearly
       // coplanar faces can overlap harmlessly when given one flat road color.
       myarahRoadAddQuad(meshes.surface,a.topL,a.topR,b.topL,b.topR);
       if(!covered){
         // The slabs/walls/rails are what formed dark triangular seams at
         // junctions. Only one road gets those visual details here.
-        myarahRoadAddQuad(meshes.wall,a.topL,a.bottomL,b.topL,b.bottomL);
-        myarahRoadAddQuad(meshes.wall,a.bottomR,a.topR,b.bottomR,b.topR);
-        myarahRoadAddQuad(meshes.edge,a.topL,a.edgeL,b.topL,b.edgeL);
-        myarahRoadAddQuad(meshes.edge,a.edgeR,a.topR,b.edgeR,b.topR);
+        // Keep a consistent imaginary light direction across *all* road
+        // segments. OSM line directions can reverse at tile boundaries;
+        // shading by left/right alone would flip between adjoining pieces.
+        const sunFacing=(normals[i-1].nx+normals[i].nx)*-.58+
+          (normals[i-1].ny+normals[i].ny)*.81 >=0;
+        myarahRoadAddQuad(meshes[sunFacing?'wallLight':'wallShade'],
+          a.topL,a.bottomL,b.topL,b.bottomL);
+        myarahRoadAddQuad(meshes[sunFacing?'wallShade':'wallLight'],
+          a.bottomR,a.topR,b.bottomR,b.topR);
+        myarahRoadAddQuad(meshes[sunFacing?'edgeLight':'edgeShade'],
+          a.topL,a.edgeL,b.topL,b.edgeL);
+        myarahRoadAddQuad(meshes[sunFacing?'edgeShade':'edgeLight'],
+          a.edgeR,a.topR,b.edgeR,b.topR);
         if(a.elevation>2.1&&b.elevation>2.1)
           myarahRoadAddQuad(meshes.shadow,a.shL,a.shR,b.shL,b.shR);
       }else overlapSections++;
@@ -1124,11 +1158,11 @@ function myarahBuildRoadRibbon(chains,routeSegments){
       // Do not index until this chain finishes: adjacent pieces of the SAME
       // road necessarily share an edge and must never mask each other.
       admitted.push([{x:pa.x,y:pa.y,z:a.elevation},
-        {x:pb.x,y:pb.y,z:b.elevation}]);
+        {x:pb.x,y:pb.y,z:b.elevation},sectionWidth]);
       visibleQuads++;
     }
     if(visibleQuads){
-      for(const [a,b] of admitted)overlapIndex.add(a,b,chain.width);
+      for(const [a,b,width] of admitted)overlapIndex.add(a,b,width);
       rendered++;
     }else skipped++;
   }
@@ -1159,7 +1193,7 @@ function myarahMakeRoadSurfaceLayer(){
         this.uMatrix=gl.getUniformLocation(this.program,'u_matrix');
         this.uColor=gl.getUniformLocation(this.program,'u_color');
         this.buffers={};this.counts={};
-        for(const k of ['shadow','wall','surface','edge','route']){
+        for(const k of ['shadow','wallShade','wallLight','surface','edgeShade','edgeLight','route']){
           this.buffers[k]=gl.createBuffer();this.counts[k]=0;
         }
         this.vao=gl.createVertexArray();
@@ -1206,14 +1240,20 @@ function myarahMakeRoadSurfaceLayer(){
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
       gl.enableVertexAttribArray(this.aPos);
+      // Soft material contrast gives the road a raised, three-dimensional
+      // appearance without claiming surveyed bridge materials or lane widths.
       const palette=dark?{
-        shadow:[.02,.06,.09,.10],wall:[.34,.42,.48,1],surface:[.51,.60,.67,1],
-        edge:[.31,.40,.48,.95],route:[.25,.64,1,.94]
+        shadow:[.01,.04,.08,.16],wallShade:[.26,.34,.40,1],
+        wallLight:[.38,.47,.54,1],surface:[.49,.57,.65,1],
+        edgeShade:[.29,.38,.45,.98],edgeLight:[.62,.70,.76,.98],
+        route:[.25,.64,1,.95]
       }:{
-        shadow:[.17,.23,.30,.09],wall:[.71,.77,.81,1],surface:[.91,.935,.950,1],
-        edge:[.76,.81,.85,.79],route:[.08,.47,.84,.94]
+        shadow:[.15,.21,.28,.14],wallShade:[.57,.65,.72,1],
+        wallLight:[.74,.80,.84,1],surface:[.86,.90,.93,1],
+        edgeShade:[.63,.71,.77,.96],edgeLight:[.96,.975,.99,.98],
+        route:[.08,.47,.84,.94]
       };
-      for(const kind of ['shadow','wall','surface','edge','route']){
+      for(const kind of ['shadow','wallShade','wallLight','surface','edgeShade','edgeLight','route']){
         if(!this.counts[kind])continue;
         gl.uniform4fv(this.uColor,palette[kind]);
         gl.bindBuffer(gl.ARRAY_BUFFER,this.buffers[kind]);
@@ -1329,6 +1369,8 @@ function myarahRefreshRoadLevels(){
     const a=c.coords[0],b=c.coords[c.coords.length-1];
     const mid=c.coords[Math.floor(c.coords.length/2)];
     return [c.kind,c.height,c.coords.length,c.approachStartMeters,c.approachEndMeters,
+      c.approachStartWidth??'',c.approachEndWidth??'',
+      c.junctionStartWidth??'',c.junctionEndWidth??'',
       c.junctionStartHeight??'',c.junctionEndHeight??'',
       ...a.map(n=>n.toFixed(6)),...mid.map(n=>n.toFixed(6)),
       ...b.map(n=>n.toFixed(6))].join(':');
@@ -1353,7 +1395,7 @@ function myarahRefreshRoadLevels(){
     ' · elevated: '+built.rendered+
     ' · road-linked ramps: '+bridged.filter(r=>r.approachStart||r.approachEnd).length+
     ' · level joins: '+(bridged.linkedLevels||0)+
-    ' · aligned joins: '+(bridged.alignedJoins||0)+
+    ' · seamless width joins: '+(bridged.alignedJoins||0)+
     ' · unsafe surfaces blocked: '+built.skipped+
     ' · same-level crossings: '+built.collisions+
     ' · overlapping edges suppressed: '+built.overlapSections+
