@@ -1,4 +1,12 @@
-# MyArah — 3D Continuous Roads Refined
+# MyArah — 3D Road Geometry Refined
+
+**Latest update:** Refines the already-working continuous 3D road renderer seen in the user's iPhone screenshots. The jagged overlapping patches at interchanges are addressed by preserving actual road bends, limiting edge join length, validating ribbons before drawing, and avoiding unsafe cross-branch tile merges. Road decks are slightly narrower and less bright. In uncertain cases, the native 2D road remains visible instead of a distorted 3D mesh. The working rendering engine, other map UI, routing, camera, natural English voice, and Liquid Glass are preserved. The road elevation is still illustrative, not surveyed.
+
+**Test:** Open the same Johor Bahru highway junction in 3D at zoom 17–18 and compare with the old screenshot. Append `?debug3d=1` to see `clean roads` and `skipped artifacts`. Fewer clean roads can be expected if the underlying data includes unsafe shapes. Actual iPhone rendering has not been verified by these offline tests.
+
+---
+
+# Earlier version — 3D Continuous Roads Refined
 
 This version replaces the previous stair-stepped, repeated MapLibre extrusions with a **single continuous 3D triangle mesh along each mapped flyover**. A varying per-vertex elevation makes the road approach the native ground road smoothly. It uses a custom MapLibre WebGL2 layer, a technique appropriate for sloped surfaces that cannot be expressed by feature-level extrusion heights.
 
@@ -910,3 +918,13 @@ The experimental WebGL custom road-surface shader could fail silently on some de
 - The slopes are **illustrative stepped approximations**, not measured road gradients or surveyed elevations. iPhone Safari / live tile appearance still needs verification.
 
 Your existing optional natural English voice integration is preserved; use the Cloudflare Worker from the earlier English Voice package if you have not deployed it yet.
+
+
+## 3D Road Geometry Refinement (November 2026)
+- Retains the working WebGL2 continuous-road layer; no new rendering engine or third-party scripts.
+- Preserves mapped shape vertices, with bounded 8 m interpolation to keep curves smooth without cutting through junctions.
+- Uses capped miter joins, narrower road widths and a subtle road-deck color to avoid jagged triangles and oversized white surfaces.
+- Skips unsafe near-U-turns and self-crossing ribbons; the flat native road stays visible whenever overlay coverage is incomplete.
+- Joins bridge tile fragments only at unambiguous two-way endpoints with compatible tangents; avoids joining multiple branches just because coordinates touch.
+- Uses actual adjoining ground road geometry for the sloped approaches when available. Elevation is illustrative, not surveyed.
+- `?debug3d=1` additionally reports how many problematic ribbons were skipped.
