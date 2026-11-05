@@ -1,3 +1,23 @@
+# MyArah — Source Road Elevation Refined
+
+This update starts from the **exact same OpenMapTiles transportation road centerlines** as the existing 2D map, then draws only confirmed elevated road sections in 3D. Unlike the previous geometry pass, it does not merge unrelated fragments to invent a new road path.
+
+## Changes in this version
+- Each elevated 3D road surface follows its actual 2D transportation source geometry.
+- Adjacent elevated segments keep their height through shared endpoints, and source-tile cuts are not treated as ramp entrances.
+- Ramps rise and descend along verified adjoining ground roads when a unique compatible connection is mapped.
+- Small illustrative bridge-end tapers are used only where there is no known continuation and the endpoint isn't a tile seam.
+- Estimated heights: first bridge level about 4.6 m, second about 8.7 m, third about 12.8 m; OSM stacking tags are NOT surveyed heights.
+- Sharper corner limits and subtler shadows reduce extraneous triangular surfaces.
+- 2D, route calculation, road matching, lane guidance, voice, tolls, and Liquid Glass are unchanged.
+
+## Test
+Upload the four root files to GitHub Pages. In MyArah, visit the same flyover, choose **3D**, and zoom in to 16+. Optional `?debug3d=1` shows source road sections, elevated parts, and road-linked ramps.
+
+**Limitation:** Roads with no mapped bridge/layer tags stay flat; exact bridge heights and grades cannot be inferred from the map alone. This is a visual prototype and must not be used to choose a driving lane or ramp.
+
+---
+
 # MyArah — 3D Road Geometry Refined
 
 **Latest update:** Refines the already-working continuous 3D road renderer seen in the user's iPhone screenshots. The jagged overlapping patches at interchanges are addressed by preserving actual road bends, limiting edge join length, validating ribbons before drawing, and avoiding unsafe cross-branch tile merges. Road decks are slightly narrower and less bright. In uncertain cases, the native 2D road remains visible instead of a distorted 3D mesh. The working rendering engine, other map UI, routing, camera, natural English voice, and Liquid Glass are preserved. The road elevation is still illustrative, not surveyed.

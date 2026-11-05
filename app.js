@@ -315,16 +315,17 @@ function add3DBuildings() {
 map.on('style.load', add3DBuildings);
 
 // === 3D ROAD SURFACE INTEGRATION (visual only; routes/GPS remain unchanged) ===
-// A bridge is part of a road centreline, not a separate cuboid. Build a thin
-// connected ribbon whose height smoothly returns to the actual flat basemap at
-// each end. This avoids floating slabs, block-shaped piers and duplicated
-// flat bridge lines beneath the 3D replacement.
+// RENDER FROM THE SAME transportation centreline as the flat basemap.
+// Never construct an independent bridge route or connect roads just because
+// they are close on screen. In 3D, assign estimated height to these mapped
+// road sections, and extend ramps along verified ground-road connections.
+// Hold deck height at tile seams instead of drawing a false ramp there.
 // OpenStreetMap layer/brunnel indicate relative bridge stacking, NOT surveyed
 // height, grade, clearance, exact junction level, or real terrain altitude.
 const MYARAH_ROAD_SURFACE_ID='myarah-3d-continuous-road-surface';
 const MYARAH_ROAD_DEBUG=new URLSearchParams(location.search).get('debug3d')==='1';
 const MYARAH_ROAD_LEVEL_MIN_ZOOM=15.35;
-const MYARAH_ROAD_LEVEL_LIMIT=85;
+const MYARAH_ROAD_LEVEL_LIMIT=105;
 const MYARAH_ROAD_CLASSES=['motorway','motorway_link','trunk','trunk_link','primary',
   'primary_link','secondary','secondary_link','tertiary','tertiary_link','minor','service'];
 const MYARAH_ROAD_WIDTHS={motorway:11.4,motorway_link:6.5,trunk:10.4,trunk_link:6.3,
@@ -356,7 +357,7 @@ function myarahRoadDeckHeight(properties){
   if(!isBridge&&!(Number.isFinite(level)&&level>0))return 0;
   // Subtle illustrated clearance, with layers only indicating stacking order.
   const order=Number.isFinite(level)&&level>0?Math.min(3,Math.max(1,Math.round(level))):1;
-  return 4.8+(order-1)*3.6;
+  return 4.6+(order-1)*4.1;
 }
 function myarahRoadDeckWidth(properties){
   const kind=String(properties?.class||'').toLowerCase();
@@ -376,6 +377,44 @@ function myarahRoadNearView(points,bounds){
 function myarahRoadDistance(a,b){
   const lat=(a[1]+b[1])*.5*Math.PI/180;
   return Math.hypot((a[0]-b[0])*111320*Math.cos(lat),(a[1]-b[1])*110540);
+}
+// The vector source is split into tiles; their edges are not physical bridge
+// entrances. Most OpenMapTiles transportation linework is cut at tile z=14,
+// sometimes z=12..15 by tiler/version. Keep level through such cut points.
+function myarahRoadIsTileEdge(point){
+  if(!Array.isArray(point)||!Number.isFinite(point[0])||!Number.isFinite(point[1]))return false;
+  const lat=Math.max(-85,Math.min(85,point[1]));
+  const rad=lat*Math.PI/180;
+  const sin=Math.sin(rad);
+  const worldY=(1-Math.log((1+sin)/(1-sin))/(2*Math.PI))*.5;
+  const worldX=(point[0]+180)/360;
+  for(let z=12;z<=15;z++){
+    const tileCount=2**z;
+    const metresPerTile=40075016.686*Math.cos(rad)/tileCount;
+    const tolerance=1.35/Math.max(1,metresPerTile);
+    const x=worldX*tileCount,y=worldY*tileCount;
+    if(Math.abs(x-Math.round(x))<=tolerance||
+       Math.abs(y-Math.round(y))<=tolerance)return true;
+  }
+  return false;
+}
+function myarahRoadHasBridgeNeighbour(road,atStart,all){
+  const point=atStart?road.coords[0]:road.coords[road.coords.length-1];
+  const outward=myarahRoadEndpointHeading(road.coords,atStart);
+  for(const other of all){
+    if(other===road||other.kind!==road.kind||Math.abs(other.height-road.height)>.1)continue;
+    for(const oppositeAtStart of [true,false]){
+      const otherPoint=oppositeAtStart?other.coords[0]:other.coords[other.coords.length-1];
+      if(myarahRoadDistance(point,otherPoint)>1.15)continue;
+      const continuation=myarahRoadEndpointHeading(other.coords,oppositeAtStart);
+      // An OSM junction can have multiple elevated branches. Only continue
+      // height along near-opposite road tangents; do not treat turns across a
+      // multi-level intersection as the same straight road section.
+      const dot=outward[0]*continuation[0]+outward[1]*continuation[1];
+      if(dot<-.67)return true;
+    }
+  }
+  return false;
 }
 function myarahRoadTangent(points,end){
   if(points.length<2)return [0,0];
@@ -530,12 +569,18 @@ function myarahRoadLineLength(coords){
 function myarahAttachBridgeApproaches(chains,allFeatures){
   const candidates=myarahRoadApproachCandidates(allFeatures);
   return chains.map(chain=>{
-    const front=myarahRoadApproach(chain,candidates,true);
-    const back=myarahRoadApproach(chain,candidates,false);
+    // A bridge continuation at this node means we are still on the same raised
+    // road. A cut tile/OSM way must NOT be mistaken for a ramp entrance.
+    const front=chain.continuesStart?[]:myarahRoadApproach(chain,candidates,true);
+    const back=chain.continuesEnd?[]:myarahRoadApproach(chain,candidates,false);
     const coords=[...front.slice().reverse(),...chain.coords,...back];
     return {...chain,coords,
       approachStartMeters:front.length?myarahRoadLineLength([chain.coords[0],...front]):0,
       approachEndMeters:back.length?myarahRoadLineLength([chain.coords[chain.coords.length-1],...back]):0,
+      // A missing ground-road continuation is not license to draw a ramp at
+      // an arbitrary vector-tile edge or the junction to another raised way.
+      keepStartHigh:chain.continuesStart||chain.tileStart,
+      keepEndHigh:chain.continuesEnd||chain.tileEnd,
       approachStart:front.length>0,approachEnd:back.length>0};
   });
 }
@@ -561,11 +606,18 @@ function myarahRoadBridgeSegments(features,bounds){
     }
     if(raw.length>=MYARAH_ROAD_LEVEL_LIMIT*2.5)break;
   }
-  const merged=myarahMergeBridgeSegments(raw).sort((a,b)=>{
-    const len=s=>s.coords.reduce((sum,p,i)=>i?sum+myarahRoadDistance(s.coords[i-1],p):0,0);
-    return len(b)-len(a);
-  });
-  return merged.slice(0,MYARAH_ROAD_LEVEL_LIMIT);
+  // Use the actual 2D source road parts, rather than greedily merging them
+  // across intersections. The previous merge could create acute triangles and
+  // extra surfaces not following the visible road geometry.
+  const segments=raw.sort((a,b)=>myarahRoadLineLength(b.coords)-myarahRoadLineLength(a.coords))
+    .slice(0,MYARAH_ROAD_LEVEL_LIMIT);
+  for(const road of segments){
+    road.continuesStart=myarahRoadHasBridgeNeighbour(road,true,segments);
+    road.continuesEnd=myarahRoadHasBridgeNeighbour(road,false,segments);
+    road.tileStart=myarahRoadIsTileEdge(road.coords[0]);
+    road.tileEnd=myarahRoadIsTileEdge(road.coords[road.coords.length-1]);
+  }
+  return segments;
 }
 function myarahRoadSmoothstep(t){
   const v=Math.max(0,Math.min(1,t));
@@ -574,14 +626,20 @@ function myarahRoadSmoothstep(t){
 // The ground-road approach carries the grade into the flyover; if OSM only
 // maps the bridge itself, use a short gentle transition rather than a tall
 // rectangular end. Heights remain illustrative, never road-matching data.
-function myarahRoadSurfaceHeight(distance,length,maxHeight,approachStart=0,approachEnd=0){
+function myarahRoadSurfaceHeight(distance,length,maxHeight,approachStart=0,approachEnd=0,
+    keepStartHigh=false,keepEndHigh=false){
   if(!(length>0)||!(maxHeight>0))return 0;
-  const fallback=Math.min(16,length*.30);
-  const maxRamp=length*.48;
-  const start=Math.min(maxRamp,approachStart>0?Math.max(9,approachStart+4):fallback);
-  const end=Math.min(maxRamp,approachEnd>0?Math.max(9,approachEnd+4):fallback);
-  const rise=myarahRoadSmoothstep(distance/Math.max(.01,start));
-  const fall=myarahRoadSmoothstep((length-distance)/Math.max(.01,end));
+  // On confirmed connecting ground roads, use the entire available approach
+  // (up to 33 m) for a believable grade; preserve the deck through tile seams.
+  // If no adjoining ground geometry exists, taper at a real exposed bridge end
+  // but NEVER invent a drop at an interior OSM/tile break.
+  const fallback=Math.min(18,length*.28);
+  const start=approachStart>0?Math.min(length*.48,approachStart):
+    keepStartHigh?0:fallback;
+  const end=approachEnd>0?Math.min(length*.48,approachEnd):
+    keepEndHigh?0:fallback;
+  const rise=start>0?myarahRoadSmoothstep(distance/start):1;
+  const fall=end>0?myarahRoadSmoothstep((length-distance)/end):1;
   return maxHeight*Math.min(rise,fall);
 }
 // Preserve every mapped bend vertex before adding interpolated samples.
@@ -632,7 +690,7 @@ function myarahRoadRibbonNormal(samples,i){
   const nx=x/size,ny=y/size;
   const denom=Math.abs(nx*(-d1[1])+ny*d1[0]);
   // Bound the miter: even a sharp bend cannot produce a protruding spike.
-  return {nx,ny,scale:Math.min(1.12,1/Math.max(.7,denom))};
+  return {nx,ny,scale:Math.min(1.07,1/Math.max(.85,denom))};
 }
 function myarahRoadSegmentsIntersect(a,b,c,d){
   const orient=(p,q,r)=>(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);
@@ -727,7 +785,8 @@ function myarahBuildRoadRibbon(chains,routeSegments){
       const p=samples[i],normal=normals[i];
       const nx=normal.nx*normal.scale,ny=normal.ny*normal.scale;
       const elevation=.018+myarahRoadSurfaceHeight(p.distance,total,chain.height,
-        chain.approachStartMeters||0,chain.approachEndMeters||0);
+        chain.approachStartMeters||0,chain.approachEndMeters||0,
+        Boolean(chain.keepStartHigh),Boolean(chain.keepEndHigh));
       const coord=(side,offset)=>({x:(p.x+nx*offset*side)/mx,y:(p.y+ny*offset*side)/my});
       const half=chain.width*.5;
       const l=coord(1,half),r=coord(-1,half);
@@ -740,8 +799,8 @@ function myarahBuildRoadRibbon(chains,routeSegments){
         edgeL:xyz(leftIn,elevation+.018),edgeR:xyz(rightIn,elevation+.018),
         stripeL:matched?xyz(coord(1,Math.min(1.45,chain.width*.16)),elevation+.065):null,
         stripeR:matched?xyz(coord(-1,Math.min(1.45,chain.width*.16)),elevation+.065):null,
-        shL:xyz(coord(1,Math.max(.1,half-1.4)),.055),
-        shR:xyz(coord(-1,Math.max(.1,half-1.4)),.055),
+        shL:xyz(coord(1,Math.max(.1,half-1.1)),.055),
+        shR:xyz(coord(-1,Math.max(.1,half-1.1)),.055),
         elevation});
     }
     for(let i=1;i<mesh.length;i++){
@@ -832,10 +891,10 @@ function myarahMakeRoadSurfaceLayer(){
       gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
       gl.enableVertexAttribArray(this.aPos);
       const palette=dark?{
-        shadow:[.02,.06,.09,.16],wall:[.34,.42,.48,1],surface:[.51,.60,.67,1],
+        shadow:[.02,.06,.09,.10],wall:[.34,.42,.48,1],surface:[.51,.60,.67,1],
         edge:[.31,.40,.48,.95],route:[.25,.64,1,.94]
       }:{
-        shadow:[.17,.23,.30,.13],wall:[.68,.74,.79,1],surface:[.916,.947,.969,1],
+        shadow:[.17,.23,.30,.09],wall:[.72,.78,.83,1],surface:[.95,.962,.970,1],
         edge:[.68,.75,.80,.83],route:[.08,.47,.84,.94]
       };
       for(const kind of ['shadow','wall','surface','edge','route']){
@@ -968,8 +1027,9 @@ function myarahRefreshRoadLevels(){
     built.skipped===0&&built.rendered===chains.length&&chains.length<MYARAH_ROAD_LEVEL_LIMIT),roads.source);
   myarahRoadDebugStatus('3D roads · zoom '+map.getZoom().toFixed(1)+
     ' · source: '+roads.source+' · tile features: '+tiles.length+
-    ' · mapped bridges: '+chains.length+
-    ' · clean roads: '+built.rendered+
+    ' · source road sections: '+chains.length+
+    ' · elevated: '+built.rendered+
+    ' · road-linked ramps: '+bridged.filter(r=>r.approachStart||r.approachEnd).length+
     ' · skipped artifacts: '+built.skipped+
     ' · triangles: '+built.triangles+
     (myarahRoadSurface?.ready?' · renderer ready':' · renderer unavailable')+
