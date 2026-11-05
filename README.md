@@ -1,3 +1,22 @@
+# MyArah — 3D Continuous Roads Refined
+
+This version replaces the previous stair-stepped, repeated MapLibre extrusions with a **single continuous 3D triangle mesh along each mapped flyover**. A varying per-vertex elevation makes the road approach the native ground road smoothly. It uses a custom MapLibre WebGL2 layer, a technique appropriate for sloped surfaces that cannot be expressed by feature-level extrusion heights.
+
+**Changes:**
+- One continuous sloped road ribbon per bridge, rather than hundreds of flat rectangular blocks.
+- Connects the visual ramp to actual adjacent ground-road centerlines when an unambiguous aligned continuation is present. Otherwise ramps begin/end at the mapped bridge boundary; never guesses a disconnected road.
+- Road side edges, a thin deck, subtle shadow, and optional conservative route highlight. No fake support blocks.
+- Reads from the working OpenFreeMap vector source identified by your last debug screenshot; fallback to the dedicated source if needed.
+- Temporarily hides the duplicated flat bridge line only when the full mapped bridge set has a working 3D replacement; restores it on camera changes, 2D, or incomplete coverage.
+- Preserves native 2D map, all original routing, lane guidance, voice, GPS and Liquid Glass. No new controls or server requirements.
+- `?debug3d=1` reports source, number of mapped bridges, continuous ribbons, triangles and WebGL renderer status and whether the GPU draw method ran.
+
+**Limits:** Heights are illustrative. The existing vector tiles contain `layer` and `brunnel`, not surveyed elevation, realistic road surface grade or terrain elevation. Bridges may lack a mapped nonbridge continuation, especially at tile boundaries. In those cases the visible surface tapers within the bridge segment and may still not exactly meet a real-world approach. WebGL2 is required; when unavailable, the native flat map is preserved instead of showing broken blocks. This isn't a road-matching or routing elevation source.
+
+**Testing:** Deploy the project root files from this ZIP to your existing GitHub Pages repository. On your iPhone, load the same Johor Bahru East Coast Highway location, enable 3D, zoom close and test with `?debug3d=1`. The expected debug text contains `renderer ready`, `GPU drawing`, and `continuous roads` above zero. Compare with your previous screenshot. Visual behavior still needs verification in live Safari/Chrome on iOS.
+
+---
+
 # MyArah — 3D Road Data Source Repair (November 2026)
 
 **What the iPhone diagnostic revealed:** At zoom 17.6, the prior build reported 0 transportation tile features and therefore generated 0 bridge pieces. This does **not** prove that roads are missing from OpenStreetMap; it means the selected vector source did not return transportation features.
