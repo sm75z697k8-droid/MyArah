@@ -537,7 +537,7 @@ function myarahRoadApproachCandidates(features){
       const key=kind+'|'+[first,last].map(p=>p.map(n=>n.toFixed(6)).join(',')).sort().join(':');
       if(seen.has(key))continue;
       seen.add(key);
-      candidates.push({kind,coords});
+      candidates.push({kind,width:MYARAH_ROAD_WIDTHS[kind]||0,coords});
     }
   }
   return candidates;
@@ -555,22 +555,34 @@ function myarahRoadEndpointHeading(points,atStart){
   const length=Math.hypot(...meters);
   return length>0?meters.map(v=>v/length):[0,0];
 }
+function myarahRoadBaseKind(kind){
+  const value=String(kind||'').toLowerCase();
+  return value.endsWith('_link')?value.slice(0,-5):value;
+}
+function myarahRoadKindsCompatible(a,b){
+  const left=myarahRoadBaseKind(a),right=myarahRoadBaseKind(b);
+  if(!left||!right)return false;
+  if(left===right)return true;
+  const rank={motorway:6,trunk:5,primary:4,secondary:3,tertiary:2,minor:1,service:0};
+  return Number.isFinite(rank[left])&&Number.isFinite(rank[right])&&Math.abs(rank[left]-rank[right])<=1;
+}
 // Only extend along ground roads that share an actual mapped node and have a
 // compatible tangent. Follow short OSM fragments through their next node so
 // a 12 m tile piece does not have to climb an entire flyover in 12 metres.
-function myarahRoadApproach(chain,candidates,atStart,maxLength=85){
+function myarahRoadApproach(chain,candidates,atStart,maxLength=115){
   const points=chain.coords;
   const end=atStart?points[0]:points[points.length-1];
   const result=[end];
   const used=new Set();
   let length=0,steps=0;
   let inward=myarahRoadEndpointHeading(points,atStart);
-  while(length<maxLength && steps++<7){
+  let sourceWidth=null;
+  while(length<maxLength && steps++<9){
     const tail=result[result.length-1];
     const matches=[];
     for(let index=0;index<candidates.length;index++){
       const road=candidates[index];
-      if(used.has(index)||road.kind!==chain.kind)continue;
+      if(used.has(index)||!myarahRoadKindsCompatible(road.kind,chain.kind))continue;
       for(const endpointIsFirst of [true,false]){
         const roadEnd=endpointIsFirst?road.coords[0]:road.coords[road.coords.length-1];
         const gap=myarahRoadDistance(tail,roadEnd);
@@ -578,16 +590,18 @@ function myarahRoadApproach(chain,candidates,atStart,maxLength=85){
         const outward=myarahRoadEndpointHeading(road.coords,endpointIsFirst);
         const dot=inward[0]*outward[0]+inward[1]*outward[1];
         if(dot>-.84)continue;
+        const widthDelta=Math.abs((road.width||chain.width)-chain.width);
         matches.push({index,road,endpointIsFirst,gap,dot,
-          score:-dot-gap*.11});
+          score:-dot-gap*.11-widthDelta*.012});
       }
     }
     matches.sort((a,b)=>b.score-a.score);
     // A genuine road junction can have several branches. Don't arbitrarily
     // connect to one when the outgoing direction is not distinguishable.
-    if(!matches.length || (matches.length>1&&matches[0].score-matches[1].score<.105))break;
+    if(!matches.length || (matches.length>1&&matches[0].score-matches[1].score<.075))break;
     const match=matches[0];
     used.add(match.index);
+    if(sourceWidth==null && match.road.width>0)sourceWidth=match.road.width;
     const outward=match.endpointIsFirst?match.road.coords:match.road.coords.slice().reverse();
     let appended=0;
     for(let i=1;i<outward.length;i++){
@@ -604,7 +618,7 @@ function myarahRoadApproach(chain,candidates,atStart,maxLength=85){
     if(!appended)break;
     inward=myarahRoadEndpointHeading(result,false);
   }
-  return length>=8?result.slice(1):[];
+  return length>=8?{coords:result.slice(1),width:sourceWidth}:{coords:[],width:null};
 }
 function myarahRoadLineLength(coords){
   let total=0;
@@ -674,8 +688,9 @@ function myarahAttachBridgeApproaches(chains,allFeatures){
   const {targets,linked,aligned}=myarahRoadJunctionHeights(chains);
   const result=chains.map((chain,index)=>{
     // A same-height bridge continuation means we're still on a raised deck.
-    const front=chain.continuesStart?[]:myarahRoadApproach(chain,candidates,true);
-    const back=chain.continuesEnd?[]:myarahRoadApproach(chain,candidates,false);
+    const frontInfo=chain.continuesStart?{coords:[],width:null}:myarahRoadApproach(chain,candidates,true);
+    const backInfo=chain.continuesEnd?{coords:[],width:null}:myarahRoadApproach(chain,candidates,false);
+    const front=frontInfo.coords,back=backInfo.coords;
     const coords=[...front.slice().reverse(),...chain.coords,...back];
     const frontMeters=front.length?myarahRoadLineLength([chain.coords[0],...front]):0;
     const backMeters=back.length?myarahRoadLineLength([chain.coords[chain.coords.length-1],...back]):0;
@@ -686,6 +701,8 @@ function myarahAttachBridgeApproaches(chains,allFeatures){
     const endHeight=backMeters?0:targets[index].end;
     return {...chain,coords,
       approachStartMeters:frontMeters,approachEndMeters:backMeters,
+      approachStartWidth:frontMeters?(frontInfo.width||chain.width):null,
+      approachEndWidth:backMeters?(backInfo.width||chain.width):null,
       junctionStartHeight:startHeight,junctionEndHeight:endHeight,
       junctionStartNormal:frontMeters?null:targets[index].startNormal,
       junctionEndNormal:backMeters?null:targets[index].endNormal,
@@ -769,6 +786,22 @@ function myarahRoadSurfaceHeight(distance,length,maxHeight,approachStart=0,appro
   const result=maxHeight+(startTarget-maxHeight)*fromStart/weight+
     (endTarget-maxHeight)*fromEnd/weight;
   return Math.max(0,result);
+}
+function myarahRoadSurfaceWidth(distance,length,maxWidth,approachStart=0,approachEnd=0,
+    approachStartWidth=null,approachEndWidth=null){
+  if(!(length>0)||!(maxWidth>0))return maxWidth;
+  const startWidth=Number.isFinite(approachStartWidth)&&approachStartWidth>0?approachStartWidth:maxWidth;
+  const endWidth=Number.isFinite(approachEndWidth)&&approachEndWidth>0?approachEndWidth:maxWidth;
+  const startDist=startWidth===maxWidth?0:
+    Math.min(length*.8,Math.max(approachStart>0?approachStart+22:0,20));
+  const endDist=endWidth===maxWidth?0:
+    Math.min(length*.8,Math.max(approachEnd>0?approachEnd+22:0,20));
+  const fromStart=startDist?1-myarahRoadSmoothstep(distance/startDist):0;
+  const fromEnd=endDist?1-myarahRoadSmoothstep((length-distance)/endDist):0;
+  const weight=Math.max(1,fromStart+fromEnd);
+  const result=maxWidth+(startWidth-maxWidth)*fromStart/weight+
+    (endWidth-maxWidth)*fromEnd/weight;
+  return Math.max(3.6,result);
 }
 // Preserve every mapped bend vertex before adding interpolated samples.
 // The previous equal-distance interpolation smoothed past sharp vertices,
@@ -1047,18 +1080,21 @@ function myarahBuildRoadRibbon(chains,routeSegments){
         chain.approachStartMeters||0,chain.approachEndMeters||0,
         Boolean(chain.keepStartHigh),Boolean(chain.keepEndHigh),
         chain.junctionStartHeight,chain.junctionEndHeight);
+      const currentWidth=myarahRoadSurfaceWidth(p.distance,total,chain.width,
+        chain.approachStartMeters||0,chain.approachEndMeters||0,
+        chain.approachStartWidth,chain.approachEndWidth);
       const coord=(side,offset)=>({x:(p.x+nx*offset*side)/mx,y:(p.y+ny*offset*side)/my});
-      const half=chain.width*.5;
+      const half=currentWidth*.5;
       const l=coord(1,half),r=coord(-1,half);
-      const edge=Math.min(.19,chain.width*.026);
+      const edge=Math.min(.19,currentWidth*.026);
       const leftIn=coord(1,half-edge),rightIn=coord(-1,half-edge);
       const topL=xyz(l,elevation),topR=xyz(r,elevation);
       const wallDepth=Math.min(.27,Math.max(0,(elevation-.018)*.08));
       const underside=Math.max(.016,elevation-wallDepth);
       mesh.push({topL,topR,bottomL:xyz(l,underside),bottomR:xyz(r,underside),
         edgeL:xyz(leftIn,elevation+.018),edgeR:xyz(rightIn,elevation+.018),
-        stripeL:matched?xyz(coord(1,Math.min(1.45,chain.width*.16)),elevation+.065):null,
-        stripeR:matched?xyz(coord(-1,Math.min(1.45,chain.width*.16)),elevation+.065):null,
+        stripeL:matched?xyz(coord(1,Math.min(1.45,currentWidth*.16)),elevation+.065):null,
+        stripeR:matched?xyz(coord(-1,Math.min(1.45,currentWidth*.16)),elevation+.065):null,
         shL:xyz(coord(1,Math.max(.1,half-1.1)),.055),
         shR:xyz(coord(-1,Math.max(.1,half-1.1)),.055),
         elevation});
