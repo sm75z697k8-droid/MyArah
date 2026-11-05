@@ -948,3 +948,13 @@ Your existing optional natural English voice integration is preserved; use the C
 - Joins bridge tile fragments only at unambiguous two-way endpoints with compatible tangents; avoids joining multiple branches just because coordinates touch.
 - Uses actual adjoining ground road geometry for the sloped approaches when available. Elevation is illustrative, not surveyed.
 - `?debug3d=1` additionally reports how many problematic ribbons were skipped.
+
+
+## 3D Surface Integrity Refined (November 2026)
+This conservative rendering revision addresses jagged white triangles at complex interchanges.
+- Previously we validated only the 2D road *centerline*. A sharply curved or looping centerline could pass those tests while its two wide surface edges intersected, causing folded triangles. We now validate both side edges and each top-surface triangle's orientation before drawing any 3D road.
+- When two mapped bridge roads cross at an indistinguishable estimated altitude, one uncertain 3D overlay is omitted to avoid overlapping same-height surfaces; the original 2D road remains visible. Actual road heights are not known from OSM layer tags.
+- If a road surface is unsafe, it is omitted from 3D instead of producing white spikes; this means some roads may remain flat at dense junctions.
+- The opt-in `?debug3d=1` view now has a **Save road data** button to export only public OSM road geometry near the displayed map. The export intentionally excludes GPS position, routes, search history and keys. If any spikes remain, send the `myarah-3d-road-data.geojson` file so those exact road shapes can be reproduced and tested; screenshots alone cannot reveal the source geometry.
+- No changes to 2D navigation, routing, GPS, lane guidance, English voice, tolls or Liquid Glass.
+- 3D appearance must still be tested in your iPhone browser: we cannot verify live tile rendering in this container.
