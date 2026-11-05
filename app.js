@@ -322,6 +322,23 @@ const MYARAH_ROAD_LEVEL_LAYERS=[
   'myarah-3d-road-decks',
   'myarah-3d-road-route'
 ];
+// A direct vector overlay remains visible even if generated extrusion polygons
+// are unavailable. It uses the same mapped bridge classification, not invented roads.
+const MYARAH_ROAD_BRIDGE_OUTLINE='myarah-3d-road-bridge-outline';
+const MYARAH_ROAD_DEBUG=new URLSearchParams(location.search).get('debug3d')==='1';
+let myarahRoadDebugNode=null;
+function myarahRoadDebugStatus(message){
+  if(!MYARAH_ROAD_DEBUG)return;
+  if(!myarahRoadDebugNode){
+    myarahRoadDebugNode=document.createElement('div');
+    myarahRoadDebugNode.className='myarah-3d-debug-status';
+    myarahRoadDebugNode.setAttribute('role','status');
+    myarahRoadDebugNode.setAttribute('aria-live','polite');
+    document.querySelector('.app')?.appendChild(myarahRoadDebugNode);
+  }
+  myarahRoadDebugNode.hidden=!tilted;
+  myarahRoadDebugNode.textContent=message;
+}
 const MYARAH_ROAD_LEVEL_MIN_ZOOM=15.35;
 const MYARAH_ROAD_LEVEL_LIMIT=145;
 const MYARAH_ROAD_LEVEL_EMPTY={type:'FeatureCollection',features:[]};
@@ -337,7 +354,9 @@ function myarahRoadDeckHeight(properties){
   const level=Number.isFinite(layer)&&layer>0?Math.min(4,Math.max(1,Math.round(layer))):1;
   // OSM layer is relative stacking order, NOT metres. Nominal 5 m per level;
   // no surveyed clearance, slope or exact deck height is implied.
-  return 5.2+(level-1)*4.8;
+  // Deliberately exaggerate the illustration slightly so the stacking
+  // reads on phone displays; these numbers are NOT measured road heights.
+  return 7.5+(level-1)*5.8;
 }
 function myarahRoadDeckWidth(properties){
   const kind=String(properties?.class||'').toLowerCase();
@@ -491,12 +510,18 @@ function myarahRefreshRoadLevels(){
   if(!myarahRoadLevelShouldDraw())return;
   let tiles;
   try{tiles=map.querySourceFeatures('myarah-building-data',{sourceLayer:'transportation'});}
-  catch(_){return;}
+  catch(error){myarahRoadDebugStatus('3D roads: vector tile query failed — '+(error?.message||'unknown error'));return;}
   if(!Array.isArray(tiles))return;
   // Cache and only set GeoJSON when the loaded bridge geometry has changed;
   // setting it on every map idle would itself schedule another idle callback.
   const selected=typeof routeOptions!=='undefined'?routeOptions[routeSelected]?.coordinates:null;
   const next=myarahBuildRoadLevelGeojson(tiles,map.getBounds(),selected);
+  const mappedBridges=tiles.filter(feature=>myarahRoadDeckHeight(feature?.properties)>0).length;
+  const loaded=map.isSourceLoaded('myarah-building-data');
+  myarahRoadDebugStatus('3D roads · zoom '+map.getZoom().toFixed(1)+
+    ' · tile features: '+tiles.length+' · tagged bridges: '+mappedBridges+
+    ' · raised decks: '+next.data.features.length+
+    (loaded?'':' · loading tiles…'));
   if(next.signature===myarahRoadLevelSignature&&!myarahRoadLevelDirty)return;
   myarahRoadLevelSignature=next.signature;
   myarahRoadLevelDirty=false;
@@ -510,6 +535,9 @@ function myarahQueueRoadLevels(force=false){
 }
 function myarahSetRoadLevelVisibility(){
   const visibility=tilted?'visible':'none';
+  if(map.getLayer(MYARAH_ROAD_BRIDGE_OUTLINE))map.setLayoutProperty(MYARAH_ROAD_BRIDGE_OUTLINE,'visibility',visibility);
+  if(myarahRoadDebugNode)myarahRoadDebugNode.hidden=!tilted;
+  if(tilted)myarahRoadDebugStatus('3D roads · waiting for bridge tiles…');
   for(const layer of MYARAH_ROAD_LEVEL_LAYERS){
     if(map.getLayer(layer))map.setLayoutProperty(layer,'visibility',visibility);
   }
@@ -525,6 +553,25 @@ function myarahInstallRoadLevels(){
     map.addSource(MYARAH_ROAD_LEVEL_SOURCE,{type:'geojson',data:MYARAH_ROAD_LEVEL_EMPTY});
   }
   const firstLabel=map.getStyle()?.layers?.find(layer=>layer.type==='symbol')?.id;
+  // Bridge edge highlight uses the native vector line directly, independent
+  // of the temporary polygon-generation path. This makes tagged bridges
+  // discoverable on iPhones while clearly distinguishing them from ground roads.
+  if(!map.getLayer(MYARAH_ROAD_BRIDGE_OUTLINE))map.addLayer({
+    id:MYARAH_ROAD_BRIDGE_OUTLINE,
+    type:'line',
+    source:'myarah-building-data',
+    'source-layer':'transportation',
+    minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
+    filter:['all',['==',['get','brunnel'],'bridge'],
+      ['in',['get','class'],['literal',['motorway','trunk','primary','secondary','tertiary','minor','service']]]],
+    layout:{visibility:tilted?'visible':'none','line-cap':'round','line-join':'round'},
+    paint:{
+      'line-color':dark?'#a7d0f3':'#267da9',
+      'line-opacity':.95,
+      'line-width':['interpolate',['linear'],['zoom'],15.35,1.7,17,3.3,19,5.5],
+      'line-dasharray':[2.5,1.7]
+    }
+  },firstLabel);
   const base={type:'fill',source:MYARAH_ROAD_LEVEL_SOURCE,minzoom:MYARAH_ROAD_LEVEL_MIN_ZOOM,
     layout:{visibility:tilted?'visible':'none'},
     paint:{'fill-color':dark?'#08121c':'#526678','fill-opacity':dark?.24:.17}};
@@ -996,7 +1043,7 @@ $('tilt').addEventListener('click',()=>{
   map.easeTo({
     pitch: tilted ? THREE_D_PITCH : 0,
     bearing: tilted ? THREE_D_BEARING : 0,
-    zoom: tilted ? Math.max(map.getZoom(), BUILDING_ZOOM) : map.getZoom(),
+    zoom: tilted ? Math.max(map.getZoom(), 16.15) : map.getZoom(),
     duration: reducedMotion ? 0 : 760,
     easing: cameraEase
   });
@@ -1004,7 +1051,7 @@ $('tilt').addEventListener('click',()=>{
   $('tilt').classList.toggle('is-active',tilted);
   $('tilt').setAttribute('aria-pressed',String(tilted));
   $('tilt').setAttribute('aria-label',tilted?'Switch to 2D map':'Switch to 3D map');
-  toast(tilted?'3D mode · bridge levels approximate':'2D map');
+  toast(tilted?'3D mode · mapped bridges highlighted; heights illustrative':'2D map');
 });
 // Compass button behavior is managed by the cardinal dial module below.
 // iPhone-style facing-direction cone. This uses a real compass reading when

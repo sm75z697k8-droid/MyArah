@@ -823,3 +823,17 @@ https://developers.cloudflare.com/workers/configuration/secrets/
 - Test in Safari / iPhone Home Screen, ideally around a well-mapped flyover with close zoom. Turn 3D off to compare against the original map.
 
 OSM/OpenMapTiles tags and heights: https://openmaptiles.org/docs/schema/ and https://wiki.openstreetmap.org/wiki/Key:layer.
+
+
+## 3D road visibility diagnostic update (November 2026)
+
+The initial elevated-road experiment was too difficult to verify: a missing bridge tag could silently produce an empty extrusion layer and the decks were subtle on small phone screens. This revision is still **experimental**, and is **not** a guarantee of coverage.
+
+- 3D mode now shows dashed outlines of mapped **bridges** directly from the source vector tiles. These are intended as visual bridge indicators at zoom 15.35+, not lane instructions, real-time data, or proof of physical height. They disappear in 2D.
+- Raised road decks use slightly exaggerated illustrative heights for readability (first tagged level 7.5 m, then +5.8 m per tagged layer). These are emphatically **NOT measured road elevations or clearance values**.
+- On switching to 3D, the map zooms to at least 16.15, making narrow road structures easier to inspect without affecting the existing navigation follow camera rules.
+- For diagnosing absent bridges, append `?debug3d=1` to your GitHub Pages URL (or `&debug3d=1` if you already have query parameters). In 3D mode a small diagnostics line shows map zoom, number of transportation features currently returned by the tile source, number recognized as bridge/positive layer, and number of generated elevated decks.
+- If it shows `tagged bridges: 0`, current tiles do not expose qualifying road tags there. If it shows bridge tags but `raised decks: 0`, the bridge geometries have been filtered by the conversion logic. If it shows nonzero decks but no visible 3D, the problem is in display/occlusion and needs further testing. Source loading and map network access are separate possible blockers.
+- The debug overlay is **off by default**, and neither 2D road styling nor routing/lane matching uses these estimated heights. Only use the experimental 3D layer as a visual guide; real road signs take priority.
+
+We could not confirm live vector tiles or visual performance on a physical iPhone in this environment. Please report the debug counts from a test flyover rather than assuming any location is supported.

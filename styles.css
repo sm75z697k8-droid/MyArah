@@ -2671,3 +2671,13 @@ body.dark #voiceMenu #englishVoiceUrl{background:rgba(22,40,62,.94);border-color
 body.dark #voiceMenu .myarah-english-voice-actions button{background:rgba(46,75,101,.85);color:#e6f3ff;border-color:rgba(150,191,223,.42);}
 body.dark #voiceMenu .myarah-english-voice-actions button[aria-pressed="true"]{background:#245b85;}
 body.dark #voiceMenu #englishVoiceStatus[data-error="true"]{color:#ffb1a6;}
+
+/* 3D road diagnostics are opt-in only (?debug3d=1), never shown in normal navigation. */
+.myarah-3d-debug-status {
+  position:absolute;top:calc(env(safe-area-inset-top) + 82px);left:12px;right:12px;
+  z-index:19;max-width:420px;padding:9px 12px;border-radius:12px;
+  color:#fff;background:rgba(15,35,51,.9);border:1px solid rgba(255,255,255,.3);
+  box-shadow:0 5px 22px rgba(0,0,0,.15);font:600 12px/1.35 -apple-system,BlinkMacSystemFont,sans-serif;
+  pointer-events:none;
+}
+.myarah-3d-debug-status[hidden]{display:none!important}
