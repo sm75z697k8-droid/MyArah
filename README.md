@@ -1,3 +1,11 @@
+# MyArah — 3D Roads Visible Refined (Latest Repair)
+
+**Latest version:** The custom WebGL bridge shader has been replaced with native MapLibre `fill-extrusion` rendering using thin, adjoining, height-stepped strips. This repair targets the problem where the previous road surface rendered nothing on iPhone. Switch to 3D and zoom close to a mapped flyover. Use `?debug3d=1` on your GitHub Pages URL to inspect bridge counts. The road heights and slopes remain illustrative, not measured.
+
+The sections below preserve the historical project feature notes; earlier experimental 3D approaches described lower down have been superseded by this repair.
+
+---
+
 # MyArah — Real Malaysia Place Search (built on your latest project)
 
 A minimal, premium, iPhone-first map prototype with an interactive map. Inspired by the clarity of modern navigation apps, without using Apple branding or proprietary assets.
@@ -856,3 +864,16 @@ This update replaces the previous detached 3D bridge blocks, support posts and r
 - Use `?debug3d=1` in the GitHub Pages URL to see how many bridge surfaces the map can construct.
 - Navigation GPS, routing, guidance, speedometer, tolls, voice, and Liquid Glass are unchanged.
 - Check flyovers visually in iPhone Safari 3D mode, then return to 2D when you prefer the original map.
+
+
+## 3D elevated-road visibility repair (November 2026)
+
+The experimental WebGL custom road-surface shader could fail silently on some devices, leaving the flyovers invisible. This version **replaces it with MapLibre's built-in `fill-extrusion` renderer** (the same technique already used for the working 3D buildings).
+
+- Road decks are formed from many short adjoining road-shaped strips, with gradually changing height and small deck thickness. There are no separate square support blocks.
+- The native flat road features are not globally filtered out; this avoids making real roads disappear if bridge tile data is unavailable or partial.
+- 2D is unchanged; 3D ramps require mapped OSM bridge/layer tags and close zoom (around 15.35+).
+- Append `?debug3d=1` to your MyArah URL for visible counts of map road features and generated ramp strips. Example: `https://YOURNAME.github.io/YOURREPO/?debug3d=1`.
+- The slopes are **illustrative stepped approximations**, not measured road gradients or surveyed elevations. iPhone Safari / live tile appearance still needs verification.
+
+Your existing optional natural English voice integration is preserved; use the Cloudflare Worker from the earlier English Voice package if you have not deployed it yet.
