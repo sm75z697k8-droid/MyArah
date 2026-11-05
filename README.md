@@ -810,3 +810,16 @@ Official references: Microsoft Azure Speech REST API:
 https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech
 and Cloudflare Workers secrets:
 https://developers.cloudflare.com/workers/configuration/secrets/
+
+
+## NEW — 3D elevated road decks and interchange levels (visual experiment, November 2026)
+
+- In **3D mode** at zoom **15.35+**, MyArah identifies mapped **bridge** and **positive road `layer`** features in OpenFreeMap's `transportation` vector tiles and locally converts their centre-lines into floating 3D road decks. The 2D basemap remains exactly as before.
+- Approximate bridge levels: first level ≈ 5.2 m, second ≈ 10.0 m, third ≈ 14.8 m, fourth ≈ 19.6 m. These heights are **illustrations of relative road stacking**, NOT measured road heights, clearances, accurate ramp slopes, or structural engineering data. OpenStreetMap `layer` is not height in metres.
+- Tunnel/underpass roads are **not extruded**; they remain at the map's ordinary surface display, which helps distinguish a raised bridge above an underpass. The implementation cannot reconstruct underground geometry from missing height data.
+- A thin deck and subtle ground shadow provide visual separation. When a bridge section appears aligned with a selected TomTom route, an additional elevated blue highlight is drawn on that deck **only as a visual cue**; the real route lines and routing decisions are untouched. Matching may fail or be ambiguous at stacked/parallel roads.
+- This is a lightweight, client-side demonstration (no API key, new library, 3D tile vendor or uploaded road model). Geometry is generated from currently loaded vector tiles after the camera settles, capped at 145 road sections, disabled in 2D, and reinstalled on light/dark style changes. Some locations do not have bridge/layer data and will display no additional decks.
+- **Navigation safety:** Do not infer an exact road level, driving lane, ramp, clearance, traffic rule, or safe turn from the rendered structures. Follow road signs and the provider's actual navigation instructions. 3D overlays do not fix GPS altitude or flyover-road matching.
+- Test in Safari / iPhone Home Screen, ideally around a well-mapped flyover with close zoom. Turn 3D off to compare against the original map.
+
+OSM/OpenMapTiles tags and heights: https://openmaptiles.org/docs/schema/ and https://wiki.openstreetmap.org/wiki/Key:layer.
