@@ -335,6 +335,193 @@ let myarahRoadDebugNode=null;
 let myarahRoadDebugTextNode=null;
 let myarahRoadLastTileSample=[];
 let myarahRoadLastTileSource='none';
+
+// === ELEVATION DATA SYSTEM ===
+// Public Mapzen/Tilezen Terrarium tiles provide *bare-earth* altitude (metres).
+// A DEM cannot measure a bridge deck or its clearance. The OpenStreetMap
+// layer-based bridge height remains an explicitly illustrative fallback.
+// Optional site-owned profiles in road-elevation.geojson may supply deck
+// elevations above sea level; they are validated and spatially matched.
+const MYARAH_ELEVATION_TERRAIN_SOURCE='myarah-ground-elevation-dem';
+const MYARAH_ELEVATION_ALLOWED=new URLSearchParams(location.search).get('terrain')!=='off';
+const MYARAH_ELEVATION_URL='road-elevation.geojson';
+let myarahElevationTerrainOn=false;
+let myarahElevationTerrainFault='';
+let myarahElevationTerrainTimeout=null;
+let myarahElevationSuccessfulQueries=0;
+let myarahElevationCompletedRoads=0;
+let myarahElevationVisibleBridgeCount=0;
+let myarahElevationProfiles=[];
+let myarahElevationProfileVersion=0;
+let myarahElevationStatus='profiles not loaded';
+const MYARAH_ELEVATION_PROFILE_LIMIT=120;
+const MYARAH_ELEVATION_MAX_DISTANCE=9.5;
+function myarahElevationValidProfile(feature){
+  const p=feature?.properties||{},geo=feature?.geometry;
+  if(geo?.type!=='LineString'||!Array.isArray(geo.coordinates)||
+      p.type!=='road_deck_elevation'||
+      !['EGM96','MSL'].includes(p.vertical_datum)||
+      typeof p.source!=='string'||p.source.trim().length<3||
+      geo.coordinates.length<2||geo.coordinates.length>320)return null;
+  const coords=geo.coordinates;
+  if(!coords.every(c=>Array.isArray(c)&&c.length>=3&&
+    c.slice(0,3).every(Number.isFinite)&&Math.abs(c[0])<=180&&
+    Math.abs(c[1])<=85&&c[2]>-500&&c[2]<9000))return null;
+  // Reject accidental kilometres/feet, repeated points, and profile spikes.
+  for(let i=1;i<coords.length;i++){
+    const a=coords[i-1],b=coords[i],lat=(a[1]+b[1])*.5*Math.PI/180;
+    const length=Math.hypot((b[0]-a[0])*111320*Math.cos(lat),(b[1]-a[1])*110540);
+    if(length<.5||Math.abs(b[2]-a[2])/length>.40)return null;
+  }
+  const klass=typeof p.road_class==='string'?p.road_class.toLowerCase():null;
+  return {coords:coords.map(p=>p.slice(0,3)),roadClass:klass,
+    source:p.source.slice(0,100),datum:p.vertical_datum};
+}
+function myarahElevationNearestAltitude(position,profile,maxDistance=MYARAH_ELEVATION_MAX_DISTANCE){
+  const coords=profile?.coords;
+  if(!Array.isArray(coords)||coords.length<2)return null;
+  const lat=position[1],mx=111320*Math.max(.1,Math.cos(lat*Math.PI/180)),my=110540;
+  let closest=Infinity,height=null;
+  const x=position[0]*mx,y=position[1]*my;
+  for(let i=1;i<coords.length;i++){
+    const a=coords[i-1],b=coords[i];
+    const dx=(b[0]-a[0])*mx,dy=(b[1]-a[1])*my;
+    const d2=dx*dx+dy*dy;
+    if(d2<.5)continue;
+    const t=Math.max(0,Math.min(1,((x-a[0]*mx)*dx+(y-a[1]*my)*dy)/d2));
+    const delta=Math.hypot(a[0]*mx+t*dx-x,a[1]*my+t*dy-y);
+    if(delta<closest){closest=delta;height=a[2]+(b[2]-a[2])*t;}
+  }
+  return closest<=maxDistance?height:null;
+}
+function myarahElevationMatchProfile(chain){
+  const sourceCoords=chain.bridgeCoords||chain.coords;
+  if(!sourceCoords?.length||!myarahElevationProfiles.length)return null;
+  const points=[sourceCoords[0],sourceCoords[Math.floor(sourceCoords.length/2)],
+    sourceCoords[sourceCoords.length-1]];
+  for(const p of myarahElevationProfiles){
+    if(p.roadClass&&p.roadClass!==chain.kind)continue;
+    const samples=points.map(x=>myarahElevationNearestAltitude(x,p));
+    // Require all three samples. A nearby parallel carriageway must not
+    // inherit an unrelated bridge's measured heights.
+    if(samples.every(Number.isFinite))return p;
+  }
+  return null;
+}
+function myarahElevationTerrainHeight(lnglat){
+  if(!myarahElevationTerrainOn||typeof map.queryTerrainElevation!=='function')return null;
+  try{
+    const value=map.queryTerrainElevation(lnglat);
+    if(Number.isFinite(value)&&value>-500&&value<9000){
+      myarahElevationSuccessfulQueries++;
+      return value;
+    }
+    return null;
+  }catch(_){return null;}
+}
+function myarahElevationSampleTerrain(samples,mx,my){
+  if(!myarahElevationTerrainOn)return null;
+  if(samples.length<2)return null;
+  // DEM resolution is coarser than the visual roadway triangulation.
+  // Sample every ~24 m rather than per interpolated vertex, then interpolate.
+  const values=new Array(samples.length);
+  const indices=[0];
+  let previousDistance=0;
+  for(let i=1;i<samples.length-1;i++){
+    if(samples[i].distance-previousDistance>=23){indices.push(i);previousDistance=samples[i].distance;}
+  }
+  indices.push(samples.length-1);
+  for(const i of indices){
+    const s=samples[i];
+    const value=myarahElevationTerrainHeight([s.x/mx,s.y/my]);
+    // Partial DEM availability is not permission to fabricate altitude;
+    // keep the native road visible and try again when its tiles arrive.
+    if(value===null)return null;
+    values[i]=value;
+  }
+  for(let k=1;k<indices.length;k++){
+    const start=indices[k-1],end=indices[k];
+    const span=samples[end].distance-samples[start].distance;
+    for(let j=start+1;j<end;j++){
+      const t=span>0?(samples[j].distance-samples[start].distance)/span:0;
+      values[j]=values[start]+(values[end]-values[start])*t;
+    }
+  }
+  return values;
+}
+function myarahElevationInstallTerrain(){
+  if(!MYARAH_ELEVATION_ALLOWED||typeof map.setTerrain!=='function')return;
+  try{
+    if(!map.getSource(MYARAH_ELEVATION_TERRAIN_SOURCE))map.addSource(MYARAH_ELEVATION_TERRAIN_SOURCE,{
+      type:'raster-dem',encoding:'terrarium',tileSize:256,minzoom:4,maxzoom:14,
+      tiles:['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+      attribution:'DEM: Mapzen/Tilezen · <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener">terrain data credits</a>'
+    });
+    if(tilted)myarahElevationSetTerrain(true);
+  }catch(error){
+    myarahElevationTerrainFault='DEM initialization failed';
+    myarahElevationTerrainOn=false;
+    console.warn('[MyArah] Terrain source failed; using estimated bridge elevations',error);
+  }
+}
+function myarahElevationSetTerrain(enabled){
+  if(!MYARAH_ELEVATION_ALLOWED||typeof map.setTerrain!=='function')return;
+  try{
+    const current=typeof map.getTerrain==='function'?map.getTerrain():null;
+    if(enabled){
+      if(!map.getSource(MYARAH_ELEVATION_TERRAIN_SOURCE))return;
+      if(current?.source!==MYARAH_ELEVATION_TERRAIN_SOURCE)
+        map.setTerrain({source:MYARAH_ELEVATION_TERRAIN_SOURCE,exaggeration:1});
+      myarahElevationTerrainOn=true;
+      myarahElevationTerrainFault='';
+      if(myarahElevationTerrainTimeout)clearTimeout(myarahElevationTerrainTimeout);
+      myarahElevationSuccessfulQueries=0;
+      myarahElevationCompletedRoads=0;
+      myarahElevationVisibleBridgeCount=0;
+      // If tile requests are blocked/offline, do not leave all bridges
+      // invisible. Restore the previous illustrated 3D road mode automatically.
+      myarahElevationTerrainTimeout=setTimeout(()=>{
+        myarahElevationTerrainTimeout=null;
+        if(!myarahElevationTerrainOn||myarahElevationVisibleBridgeCount===0||
+            myarahElevationCompletedRoads>0)return;
+        myarahElevationTerrainFault='DEM unavailable; estimated elevation fallback';
+        myarahElevationSetTerrain(false);
+        myarahQueueRoadLevels(true);
+      },14000);
+    }else{
+      if(myarahElevationTerrainTimeout)clearTimeout(myarahElevationTerrainTimeout);
+      myarahElevationTerrainTimeout=null;
+      if(current?.source===MYARAH_ELEVATION_TERRAIN_SOURCE)map.setTerrain(null);
+      myarahElevationTerrainOn=false;
+    }
+    myarahRoadSurfaceDirty=true;
+  }catch(error){
+    myarahElevationTerrainOn=false;
+    myarahElevationTerrainFault='terrain unsupported';
+    console.warn('[MyArah] Terrain unavailable; continuing with flat basemap',error);
+  }
+}
+async function myarahElevationLoadProfiles(){
+  try{
+    const response=await fetch(MYARAH_ELEVATION_URL,{cache:'no-store'});
+    if(!response.ok)throw new Error('profile file unavailable');
+    const data=await response.json();
+    if(data?.type!=='FeatureCollection'||!Array.isArray(data.features))
+      throw new Error('invalid elevation feature collection');
+    myarahElevationProfiles=data.features.slice(0,MYARAH_ELEVATION_PROFILE_LIMIT)
+      .map(myarahElevationValidProfile).filter(Boolean);
+    myarahElevationStatus=myarahElevationProfiles.length+' deck profiles';
+  }catch(error){
+    myarahElevationProfiles=[];
+    myarahElevationStatus='no deck profiles';
+  }
+  myarahElevationProfileVersion++;
+  myarahRoadSurfaceDirty=true;
+  if(tilted)myarahQueueRoadLevels(true);
+}
+// Profile data loads once. It is publicly hosted, contains no user location,
+// and is not downloaded from the user's phone or exposed to routing logic.
+myarahElevationLoadProfiles();
 // Export only public OpenStreetMap road geometry, never user GPS, search history,
 // navigation route, or API credentials. Use this to reproduce a bad tile seam.
 function myarahSave3DRoadData(){
@@ -711,7 +898,7 @@ function myarahAttachBridgeApproaches(chains,allFeatures){
     // vector-tile edge or at an unverified split.
     const startHeight=frontMeters?0:targets[index].start;
     const endHeight=backMeters?0:targets[index].end;
-    return {...chain,coords,
+    return {...chain,coords,bridgeCoords:chain.coords,
       approachStartMeters:frontMeters,approachEndMeters:backMeters,
       approachStartWidth:frontMeters?(frontInfo.width||chain.width):null,
       approachEndWidth:backMeters?(backInfo.width||chain.width):null,
@@ -1056,6 +1243,7 @@ function myarahRoadSurfaceOverlapIndex(cellSize=24){
 function myarahBuildRoadRibbon(chains,routeSegments){
   const meshes={shadow:[],wallShade:[],wallLight:[],surface:[],edgeShade:[],edgeLight:[],route:[]};
   let anchor=null,rendered=0,triangles=0,skipped=0,collisions=0,overlapSections=0;
+  let terrainRoads=0,profileRoads=0,pendingTerrain=0;
   const overlapIndex=myarahRoadSurfaceOverlapIndex();
   const accepted=[];
   // Keep the main mapped highway before short adjacent branches when the
@@ -1069,12 +1257,15 @@ function myarahBuildRoadRibbon(chains,routeSegments){
     const xy=maplibregl.MercatorCoordinate.fromLngLat([pos.x,pos.y]);
     if(!anchor)anchor={x:xy.x,y:xy.y};
     return [xy.x-anchor.x,xy.y-anchor.y,
-      Math.max(.004,height)*xy.meterInMercatorCoordinateUnits()];
+      height*xy.meterInMercatorCoordinateUnits()];
   }
   for(const chain of ordered){
     const sample=myarahRoadSampleLine(chain.coords);
     if(!sample){skipped++;continue;}
     const {samples,total,mx,my}=sample;
+    const terrainHeights=myarahElevationSampleTerrain(samples,mx,my);
+    if(myarahElevationTerrainOn&&!terrainHeights){skipped++;pendingTerrain++;continue;}
+    const measuredProfile=terrainHeights?myarahElevationMatchProfile(chain):null;
     const normals=samples.map((_,i)=>myarahRoadRibbonNormal(samples,i));
     // Match road-edge directions across verified contiguous source segments.
     // Ground ramps already contain the joining road geometry, so their end
@@ -1097,15 +1288,30 @@ function myarahBuildRoadRibbon(chains,routeSegments){
       skipped++;collisions++;continue;
     }
     accepted.push(chain);
+    if(terrainHeights)terrainRoads++;
+    if(measuredProfile)profileRoads++;
     const mesh=[];
     const matched=myarahRoadMatchesRoute(chain.coords,routeSegments);
     for(let i=0;i<samples.length;i++){
       const p=samples[i],normal=normals[i];
       const nx=normal.nx*normal.scale,ny=normal.ny*normal.scale;
-      const elevation=.018+myarahRoadSurfaceHeight(p.distance,total,chain.height,
+      const ground=terrainHeights?.[i]??0;
+      const clearance=myarahRoadSurfaceHeight(p.distance,total,chain.height,
         chain.approachStartMeters||0,chain.approachEndMeters||0,
         Boolean(chain.keepStartHigh),Boolean(chain.keepEndHigh),
         chain.junctionStartHeight,chain.junctionEndHeight);
+      // Prefer an actual, explicitly supplied deck altitude where the road
+      // profile covers this vertex; otherwise use DEM ground + illustrative
+      // OSM-level clearance. DEM itself contains no bridge deck elevation.
+      const profileAltitude=measuredProfile?myarahElevationNearestAltitude(
+        [p.x/mx,p.y/my],measuredProfile):null;
+      let elevation=ground+clearance+.018;
+      if(profileAltitude!==null){
+        // Clamp external data to a plausible clearance over the ground to
+        // avoid floating spikes caused by wrong datum/units/profile matches.
+        const aboveGround=profileAltitude-ground;
+        if(aboveGround>=-.5&&aboveGround<55)elevation=profileAltitude+.018;
+      }
       const currentWidth=profile[i];
       const coord=(side,offset)=>({x:(p.x+nx*offset*side)/mx,y:(p.y+ny*offset*side)/my});
       const half=currentWidth*.5;
@@ -1113,15 +1319,15 @@ function myarahBuildRoadRibbon(chains,routeSegments){
       const edge=Math.min(.34,currentWidth*.047);
       const leftIn=coord(1,half-edge),rightIn=coord(-1,half-edge);
       const topL=xyz(l,elevation),topR=xyz(r,elevation);
-      const wallDepth=Math.min(.42,Math.max(0,(elevation-.018)*.11));
-      const underside=Math.max(.016,elevation-wallDepth);
+      const wallDepth=Math.min(.42,Math.max(0,(elevation-ground-.018)*.11));
+      const underside=Math.max(ground+.016,elevation-wallDepth);
       mesh.push({topL,topR,bottomL:xyz(l,underside),bottomR:xyz(r,underside),
         edgeL:xyz(leftIn,elevation+.018),edgeR:xyz(rightIn,elevation+.018),
         stripeL:matched?xyz(coord(1,Math.min(1.45,currentWidth*.16)),elevation+.065):null,
         stripeR:matched?xyz(coord(-1,Math.min(1.45,currentWidth*.16)),elevation+.065):null,
-        shL:xyz(coord(1,half+1.8),.055),
-        shR:xyz(coord(-1,half+1.8),.055),
-        elevation,width:currentWidth});
+        shL:xyz(coord(1,half+1.8),ground+.055),
+        shR:xyz(coord(-1,half+1.8),ground+.055),
+        elevation,clearance:elevation-ground,width:currentWidth});
     }
     let visibleQuads=0;
     const admitted=[];
@@ -1151,7 +1357,7 @@ function myarahBuildRoadRibbon(chains,routeSegments){
           a.topL,a.edgeL,b.topL,b.edgeL);
         myarahRoadAddQuad(meshes[sunFacing?'edgeShade':'edgeLight'],
           a.edgeR,a.topR,b.edgeR,b.topR);
-        if(a.elevation>2.1&&b.elevation>2.1)
+        if(a.clearance>2.1&&b.clearance>2.1)
           myarahRoadAddQuad(meshes.shadow,a.shL,a.shR,b.shL,b.shR);
       }else overlapSections++;
       if(matched)myarahRoadAddQuad(meshes.route,a.stripeL,a.stripeR,b.stripeL,b.stripeR);
@@ -1167,7 +1373,8 @@ function myarahBuildRoadRibbon(chains,routeSegments){
     }else skipped++;
   }
   for(const mesh of Object.values(meshes))triangles+=mesh.length/9;
-  return {meshes,anchor:anchor||{x:0,y:0},rendered,triangles,skipped,collisions,overlapSections};
+  return {meshes,anchor:anchor||{x:0,y:0},rendered,triangles,skipped,collisions,overlapSections,
+    terrainRoads,profileRoads,pendingTerrain};
 }
 function myarahMakeRoadSurfaceLayer(){
   return {
@@ -1362,6 +1569,7 @@ function myarahRefreshRoadLevels(){
   if(MYARAH_ROAD_DEBUG){myarahRoadLastTileSample=tiles;myarahRoadLastTileSource=roads.source;}
   const bounds=map.getBounds();
   const chains=myarahRoadBridgeSegments(tiles,bounds);
+  myarahElevationVisibleBridgeCount=chains.length;
   const route=typeof routeOptions!=='undefined'?routeOptions[routeSelected]?.coordinates:null;
   const visibleRoute=myarahRoadVisibleRoute(route,bounds);
   const bridged=myarahAttachBridgeApproaches(chains,tiles);
@@ -1374,9 +1582,11 @@ function myarahRefreshRoadLevels(){
       c.junctionStartHeight??'',c.junctionEndHeight??'',
       ...a.map(n=>n.toFixed(6)),...mid.map(n=>n.toFixed(6)),
       ...b.map(n=>n.toFixed(6))].join(':');
-  }).sort().join('|')+(visibleRoute.length?':route'+routeSelected:'');
+  }).sort().join('|')+(visibleRoute.length?':route'+routeSelected:'')+
+    ':dem'+Number(myarahElevationTerrainOn)+':profiles'+myarahElevationProfileVersion;
   if(!myarahRoadSurfaceDirty&&signature===myarahRoadSurfaceSignature)return;
   const built=myarahBuildRoadRibbon(bridged,visibleRoute);
+  if(built.terrainRoads>0)myarahElevationCompletedRoads+=built.terrainRoads;
   myarahRoadSurfaceSignature=signature;
   myarahRoadSurfaceDirty=false;
   if(myarahRoadSurface){
@@ -1400,6 +1610,10 @@ function myarahRefreshRoadLevels(){
     ' · same-level crossings: '+built.collisions+
     ' · overlapping edges suppressed: '+built.overlapSections+
     ' · triangles: '+built.triangles+
+    ' · terrain-based roads: '+built.terrainRoads+
+    ' · supplied deck profiles: '+built.profileRoads+
+    (built.pendingTerrain?' · awaiting DEM: '+built.pendingTerrain:'')+
+    (myarahElevationTerrainFault?' · '+myarahElevationTerrainFault:'')+
     (myarahRoadSurface?.ready?' · renderer ready':' · renderer unavailable')+
     (myarahRoadSurface?.drawCalls?' · GPU drawing':' · waiting for draw')+
     (myarahRoadBaseMasked?' · native bridge hidden':'')+
@@ -1440,7 +1654,12 @@ function myarahInstallRoadLevels(){
   }
   myarahQueueRoadLevels(true);
 }
+map.on('style.load',myarahElevationInstallTerrain);
 map.on('style.load',myarahInstallRoadLevels);
+map.on('terrain',()=>{
+  myarahRoadSurfaceDirty=true;
+  if(tilted)myarahQueueRoadLevels(true);
+});
 map.on('idle',()=>{if(myarahRoadSurfaceDirty)myarahQueueRoadLevels();});
 map.on('movestart',()=>myarahMaskFlatBridgeLines(false));
 map.on('moveend',()=>{
@@ -1448,6 +1667,12 @@ map.on('moveend',()=>{
   else myarahQueueRoadLevels();
 });
 map.on('sourcedata',event=>{
+  if(tilted&&event.sourceId===MYARAH_ELEVATION_TERRAIN_SOURCE&&event.isSourceLoaded){
+    // Terrain may arrive after the roads. Rebuild the absolute-altitude mesh
+    // only when a DEM tile finishes; the debounce collapses repeated events.
+    myarahRoadSurfaceDirty=true;
+    myarahQueueRoadLevels();
+  }
   if(tilted&&event.isSourceLoaded&&myarahRoadSourceCandidates().includes(event.sourceId)){
     myarahRoadSurfaceDirty=true;
     myarahQueueRoadLevels();
@@ -1880,6 +2105,7 @@ $('tilt').addEventListener('click',()=>{
   if (map.getLayer('myarah-3d-buildings')) {
     map.setLayoutProperty('myarah-3d-buildings','visibility',tilted?'visible':'none');
   }
+  myarahElevationSetTerrain(tilted);
   myarahSetRoadLevelVisibility();
   map.easeTo({
     pitch: tilted ? THREE_D_PITCH : 0,

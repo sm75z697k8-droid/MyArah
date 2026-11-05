@@ -1,3 +1,45 @@
+# MyArah — Ground Elevation & Bridge Deck Data System (November 2026)
+
+The new system separates **terrain (measured/modelled bare-earth altitude)** from **bridge decks (which require separately sourced height profiles)**. It extends the existing 3D road renderer; routing, GPS, voice and 2D map are unchanged.
+
+## Automatic ground elevation
+- When 3D mode is selected, MyArah adds **Mapzen/Tilezen Terrarium raster DEM** from the public AWS Open Data dataset and enables MapLibre terrain at natural scale (`exaggeration: 1`).
+- For each road mesh, samples local terrain heights at approximately 23 m intervals, interpolates between them, and raises the deck relative to the terrain. Roads can therefore reflect *real terrain relief* rather than assuming every street is at sea level.
+- DEM samples represent ground, **not the elevation of a flyover surface or exact road height**. Where no explicit bridge altitude is available, the approximate level-based clearance from the existing 3D feature remains **illustrative**. The app does not claim exact engineering elevations.
+- Until DEM tiles have loaded, MyArah leaves affected road geometry flat instead of displaying incorrect absolute-altitude meshes. If terrain rendering is unsupported, the previous illustrative bridge render is retained.
+- Turning off 3D restores the standard flat 2D map. For performance comparison or degraded network connectivity, add `?terrain=off` to the website URL to disable DEM and retain the old illustrative 3D roads.
+
+## Optional real bridge deck elevation profiles
+Add road-deck elevations from a trustworthy survey or engineering source to `road-elevation.geojson` in the repository root. **The provided file is intentionally empty**; measured bridge heights are not available from OSM bridge/layer tags or a DEM.
+
+Each GeoJSON Feature must be `LineString` with three-dimensional `[longitude, latitude, elevation_metres_above_sea_level]` coordinates and properties such as:
+
+```json
+{
+  "type": "Feature",
+  "properties": {
+    "type": "road_deck_elevation",
+    "source": "your-survey-or-engineering-source",
+    "vertical_datum": "EGM96",
+    "road_class": "motorway"
+  },
+  "geometry": {
+    "type": "LineString",
+    "coordinates": [[101.5, 3.1, 24.2], [101.501, 3.1, 24.8]]
+  }
+}
+```
+
+The above is **schema-only example data, not a real road**; do not copy it into the actual file as surveyed data. Replace with grounded geographic coordinates and elevations, using a consistent vertical datum (EGM96 or stated MSL) and proper attribution. The app validates geometry, bounds, units, provenance text, bridge alignment (three points matched within 9.5 m) and implausible clearances (over 55 m); unmatched profiles are ignored. It does not silently treat OSM layer numbers or clearance restrictions as measured bridge deck elevation. Up to 120 profiles are loaded and never affect TomTom navigation, lane guidance or GPS matching.
+
+### iPhone / GitHub Pages deployment
+Upload `index.html`, `styles.css`, `app.js`, `README.md` and the **new** `road-elevation.geojson` to the GitHub Pages root. Switch to 3D, zoom in, and optionally use `?debug3d=1` to inspect **terrain-based roads**, **supplied deck profiles** and **awaiting DEM**. A data connection is required to retrieve public terrain tiles. No new API key is required for this version. Provider reliability, attribution, and licensing should be checked before commercial use.
+
+### Testing and limits
+This update is not a surveyed 3D road network. It uses real public bare-earth elevation and can accept independently sourced bridge deck altitude where available; it cannot infer real clearance, traffic-deck elevation, or exact ramp gradients everywhere in Malaysia. This new terrain/3D interaction still requires on-device visual testing in iOS Safari and in high-relief areas. Do not use the illustrative heights for clearance or driving decisions.
+
+---
+
 # MyArah — 3D Road Depth & Connections Refined (experimental)
 
 Based on the user's latest 3D Width-Matched Connected project and recorded Johor Bahru road exports. This release prioritizes visual integration and credible geometry, **not** increased illustrative heights or more fake bridge structures.
