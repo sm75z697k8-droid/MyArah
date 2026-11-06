@@ -5,7 +5,7 @@ function readPreference() {
     const value = window.localStorage.getItem(STORAGE_KEY);
     return value === "light" || value === "dark" ? value : null;
   } catch {
-    return null; // Private browsing or storage restrictions must not break the map.
+    return null;
   }
 }
 
@@ -34,7 +34,7 @@ export function createThemeController(toggle, onChange) {
     toggle.title = `Switch to ${action} map`;
     document.querySelector('meta[name="theme-color"]')?.setAttribute(
       "content",
-      next === "dark" ? "#172127" : "#f7f8fa"
+      next === "dark" ? "#14282C" : "#F3F0E8"
     );
     onChange(next);
   }
