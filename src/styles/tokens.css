@@ -1,22 +1,20 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
-  --surface: #f7f8fa;
-  --text: #181d20;
-  --muted: #586168;
-  --border: #dce2e5;
-  --accent: #286e54;
-  --accent-soft: #e3f1e9;
-  --content-width: 580px;
+  --map-background: #f7f8fa;
+  --control-background: rgba(255, 255, 255, 0.96);
+  --control-foreground: #202a31;
+  --control-border: rgba(35, 49, 60, 0.12);
+  --focus-ring: #2563eb;
+  --status-shadow: rgba(22, 35, 42, 0.12);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --surface: #101315;
-    --text: #edf2f0;
-    --muted: #a2adaa;
-    --border: #333d3b;
-    --accent: #83cba5;
-    --accent-soft: #1e3229;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --map-background: #172127;
+  --control-background: rgba(30, 40, 49, 0.97);
+  --control-foreground: #f1f5f9;
+  --control-border: rgba(233, 239, 245, 0.16);
+  --focus-ring: #7caeff;
+  --status-shadow: rgba(0, 0, 0, 0.3);
 }

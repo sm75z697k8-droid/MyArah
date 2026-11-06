@@ -3,25 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="description" content="MyArah — a Malaysia-first navigation experience, under redesign.">
-  <meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#101315" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="MyArah — explore Malaysia on a clean, interactive map.">
+  <meta name="theme-color" content="#f7f8fa">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="MyArah">
-  <title>MyArah — Rebuilding</title>
+  <title>MyArah — Malaysia Map</title>
+  <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
   <link rel="stylesheet" href="./src/styles/tokens.css">
   <link rel="stylesheet" href="./src/styles/base.css">
-  <link rel="stylesheet" href="./src/styles/shell.css">
+  <link rel="stylesheet" href="./src/styles/map.css">
+  <script type="module" src="./src/main.js"></script>
 </head>
 <body>
-  <main class="app-shell">
-    <section class="intro" aria-labelledby="intro-title">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">↗</span><span>MyArah</span></div>
-      <p class="eyebrow">A NEW DIRECTION</p>
-      <h1 id="intro-title">We're rebuilding the way forward.</h1>
-      <p class="description">MyArah is starting fresh. Our next Malaysia-first navigation experience is being designed from the ground up.</p>
-      <p class="status"><span class="status-dot" aria-hidden="true"></span> Redesign in progress</p>
-    </section>
+  <main class="map-app" aria-label="MyArah map of Malaysia">
+    <div id="map" class="map-canvas" role="region" aria-label="Interactive map of Malaysia. Drag to pan and pinch to zoom."></div>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark map" aria-pressed="false" title="Switch to dark map">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M20.8 15.2A8.8 8.8 0 0 1 8.8 3.2 8.8 8.8 0 1 0 20.8 15.2Z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/>
+      </svg>
+    </button>
+    <div id="map-status" class="map-status" role="status" aria-live="polite">Loading map…</div>
   </main>
 </body>
 </html>

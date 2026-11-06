@@ -1,12 +1,19 @@
 # MyArah
 
-Malaysia-first navigation project. The previous prototype has been intentionally archived so the new application can be designed and implemented cleanly.
+A Malaysia-first navigation project, currently being rebuilt with a map-first approach.
 
-## Status
+## Current milestone: plain interactive map
 
-**Redesign foundation only.** The current `main` branch has no active map, routing, search, traffic, location tracking or navigation logic. The page is a temporary, accessible holding screen, **not** the finished product.
+The `main` branch currently includes:
 
-## Current files
+- A real, full-screen, interactive vector map, powered by [MapLibre GL JS](https://maplibre.org/maplibre-gl-js/docs/) v6.16.0 and [OpenFreeMap](https://openfreemap.org/quick_start/).
+- Map panning and pinch-to-zoom, with the initial view centered between Peninsular and East Malaysia.
+- Two map styles: OpenFreeMap **Positron** (light) and **Dark**, following device appearance unless manually overridden by the small theme button.
+- A safe-area-aware layout for iPhone Safari, map attribution and a connection-failure message.
+
+Not implemented: search, GPS location, routing, turn-by-turn guidance, voice, traffic, lane guidance, speed limits, road elevation or 3D mode. No simulated navigation or live-data claims are made.
+
+## File structure
 
 ```text
 MyArah/
@@ -14,36 +21,43 @@ MyArah/
 ├── README.md
 ├── index.html
 └── src/
+    ├── main.js
+    ├── features/
+    │   ├── map/
+    │   │   ├── config.js
+    │   │   └── map.js
+    │   └── theme/
+    │       └── theme.js
     └── styles/
-        ├── tokens.css       # Shared color, typography and spacing tokens
-        ├── base.css         # Base styles, accessibility and resets
-        └── shell.css        # Temporary holding-screen layout
+        ├── tokens.css
+        ├── base.css
+        └── map.css
 ```
 
-The app is a static site that can be edited from an iPhone through GitHub. There is no build requirement yet; the root `index.html` can be served directly via GitHub Pages.
+Static ES modules keep this project editable directly from an iPhone using GitHub; no build step or npm install is required. Internet access is required to load the MapLibre package and OpenFreeMap tiles.
 
-## Planned code organization
+## Preview
 
-Create folders as features are implemented rather than committing empty placeholders:
+Serve the root directory over HTTPS (for example, GitHub Pages if configured). Do not open `index.html` as a local `file://` URL: ES module imports typically require an HTTP(S) origin.
 
-- `src/components/` — small reusable UI components.
-- `src/features/map/` — map initialization, camera, layers, and markers.
-- `src/features/search/` — destination search and result UI.
-- `src/features/navigation/` — routes, guidance, ETA, rerouting.
-- `src/features/traffic/` — traffic data adapters and overlay.
-- `src/services/` — provider clients and network boundaries.
-- `src/utils/` — focused shared utilities.
-- `src/styles/` — shared design tokens and global styles.
-- `public/` — static assets when required.
+## Theme behavior
 
-Prefer small ES modules and feature-owned files. Keep provider credentials out of the browser repository. Implement real geographic data integrations separately from UI prototypes; never label mock data as live.
+Initially follows the device light/dark setting. Tapping the theme button sets an explicit choice in `localStorage`, which remains in effect on future visits. To return to automatic appearance, clear the site's stored preference `myarah.map.theme`. Changing map styles keeps the current camera position.
 
-## Restore the old prototype
+## Architecture notes
 
-The full pre-redesign code is preserved in branch [`archive/pre-revamp-2026-11-07`](../../tree/archive/pre-revamp-2026-11-07), from commit `82862a90c3137e226922a39688791c4dc9e56c76`. The commit history also remains available on `main`.
+- External map styles: `src/features/map/config.js`. OpenFreeMap provides the map data; theme colors are owned by the provider style JSON, not the CSS token file.
+- Rendering and gestures: `src/features/map/map.js`.
+- Persisted theme and system appearance: `src/features/theme/theme.js`.
+- Loading/error state and startup: `src/main.js`.
+- CSS design tokens, base layout and map UI are kept separate.
 
-The old `cloudflare-worker/worker.js` source was removed from the new `main` tree along with the rest of the old code. Removing a source file **does not** automatically stop an independently deployed Cloudflare Worker or delete its secrets/configuration; those must be managed separately if needed.
+A custom Malaysian cartographic theme can be developed later after the provider styles have been tested on iPhone. Confirm provider availability, licensing and usage policies before scaling beyond this prototype.
 
-## Next step
+## Previous app
 
-Define the new design system, navigation architecture, map provider and initial UI before adding production functionality.
+The complete pre-redesign prototype is preserved in branch [`archive/pre-revamp-2026-11-07`](../../tree/archive/pre-revamp-2026-11-07), original commit `82862a90c3137e226922a39688791c4dc9e56c76`. Earlier Cloudflare Worker deployments are not automatically disabled by removing their source code from `main`.
+
+## Next milestone
+
+Review the daylight/night cartography on-device, then add the minimal reusable app controls and search interface.
