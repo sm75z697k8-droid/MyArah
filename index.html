@@ -3,236 +3,25 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#e9eff3">
+  <meta name="description" content="MyArah — a Malaysia-first navigation experience, under redesign.">
+  <meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101315" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="MyArah">
-  <meta name="description" content="MyArah — discover Malaysia, beautifully.">
-  <title>MyArah — Explore Malaysia</title>
-  <link rel="preconnect" href="https://tiles.openfreemap.org">
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles.css?v=myarah-road-elevation-system-1">
-  <script type="module" src="app.js?v=myarah-road-elevation-system-1"></script>
+  <title>MyArah — Rebuilding</title>
+  <link rel="stylesheet" href="./src/styles/tokens.css">
+  <link rel="stylesheet" href="./src/styles/base.css">
+  <link rel="stylesheet" href="./src/styles/shell.css">
 </head>
 <body>
-  <main class="app" aria-label="MyArah map">
-    <div id="map" aria-label="Interactive map of Malaysia"></div>
-    <div class="status-bar-wash" aria-hidden="true"></div>
-    <header class="topbar">
-      <button class="avatar surface theme-toggle" id="theme" type="button" aria-label="Switch to dark map" aria-pressed="false" title="Change appearance">
-        <svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.3 15.6A8.4 8.4 0 0 1 8.4 3.7a8.6 8.6 0 1 0 11.9 11.9Z"/></svg>
-        <svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2.1M12 19.9V22M4.93 4.93l1.5 1.5m11.14 11.14 1.5 1.5M2 12h2.1M19.9 12H22M4.93 19.07l1.5-1.5M17.57 6.43l1.5-1.5"/></svg>
-      </button>
-    </header>
-    <div class="map-controls">
-      <button id="trafficToggle" class="control surface traffic-control" type="button" aria-label="Turn on live traffic" aria-pressed="false" title="Live traffic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16M4 12h16M4 17.5h16"/><path class="traffic-mini-green" d="M4 6.5h7"/><path class="traffic-mini-yellow" d="M12 12h8"/><path class="traffic-mini-red" d="M4 17.5h11"/></svg></button>
-      <button id="locate" class="control surface primary-control" aria-label="Show my location" title="My location"><svg viewBox="0 0 24 24"><path d="m12 3-7.5 17L12 16l7.5 4L12 3Z"/></svg></button>
-      <button id="tilt" class="control surface text-control" aria-label="Switch to 3D map" aria-pressed="false" title="2D / 3D map"><span class="myarah-glass-label">3D</span></button>
-      <button id="north" class="control compass-control" type="button" aria-label="Map points North. Tap to reset the map north." title="Reset map north">
-          <span class="compass-dial" aria-hidden="true">
-            <svg id="compassRose" class="compass-rose" viewBox="0 0 64 64">
-              <circle cx="32" cy="32" r="28.5" class="compass-ring"/>
-              <line x1="32" y1="8" x2="32" y2="13.5" transform="rotate(0 32 32)" class="compass-tick-major"/>
-              <line x1="32" y1="9.2" x2="32" y2="13.1" transform="rotate(22.5 32 32)" class="compass-tick"/>
-              <line x1="32" y1="9.2" x2="32" y2="13.1" transform="rotate(45 32 32)" class="compass-tick"/>
-              <line x1="32" y1="9.2" x2="32" y2="13.1" transform="rotate(67.5 32 32)" class="compass-tick"/>
-              <line x1="32" y1="8" x2="32" y2="13.5" transform="rotate(90 32 32)" class="compass-tick-major"/>
-              <line x1="32" y1="9.2" x2="32" y2="13.1" transform="rotate(112.5 32 32)" class="compass-tick"/>
-              <line x1="32" y1="9.2" x2="32" y2="13.1" transform="rotate(135 32 32)" class="compass-tick"/>
-              <line x1="32" y1="9.2" x2="32" y2="13.1" transform="rotate(157.5 32 32)" class="compass-tick"/>
-              <line x1="32" y1="8" x2="32" y2="13.5" transform="rotate(180 32 32)" class="compass-tick-major"/>
-              <line x1="32" y1="9.2" x2="32" y2="13.1" transform="rotate(202.5 32 32)" class="compass-tick"/>
-              <line x1="32" y1="9.2" x2="32" y2="13.1" transform="rotate(225 32 32)" class="compass-tick"/>
-              <line x1="32" y1="9.2" x2="32" y2="13.1" transform="rotate(247.5 32 32)" class="compass-tick"/>
-              <line x1="32" y1="8" x2="32" y2="13.5" transform="rotate(270 32 32)" class="compass-tick-major"/>
-              <line x1="32" y1="9.2" x2="32" y2="13.1" transform="rotate(292.5 32 32)" class="compass-tick"/>
-              <line x1="32" y1="9.2" x2="32" y2="13.1" transform="rotate(315 32 32)" class="compass-tick"/>
-              <line x1="32" y1="9.2" x2="32" y2="13.1" transform="rotate(337.5 32 32)" class="compass-tick"/>
-              <path class="compass-tip" d="M32 5.5 36.1 13.2 32 11.4 27.9 13.2 32 5.5Z"/>
-            </svg>
-            <span id="compassCardinal" class="compass-cardinal">N</span>
-          </span>
-        </button>
-    </div>
-    <aside id="trafficLegend" class="traffic-legend surface" hidden aria-label="Current traffic colors">
-      <div class="traffic-legend-top"><span class="traffic-live-dot" aria-hidden="true"></span><span id="trafficLiveLabel">Traffic on</span><button id="trafficSettings" type="button" aria-label="Traffic settings" title="Traffic settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.9v2M12 19.1v2M4.3 4.3l1.5 1.5M18.2 18.2l1.5 1.5M2.9 12h2M19.1 12h2M4.3 19.7l1.5-1.5M18.2 5.8l1.5-1.5"/></svg></button></div>
-      <div class="traffic-legend-colors"><span><i class="traffic-swatch clear"></i>Clear</span><span><i class="traffic-swatch slow"></i>Slow</span><span><i class="traffic-swatch jam"></i>Jam</span></div>
-    </aside>
-    <div id="routePickBanner" class="route-pick-banner surface" hidden role="status">Tap the map to choose a starting point <button id="routePickCancel" type="button">Cancel</button></div>
-    <section id="bottomSheet" class="sheet surface" data-sheet-state="peek" aria-label="Explore destinations">
-      <div id="sheetDragArea" class="sheet-drag-area">
-        <button id="sheetGrabber" class="sheet-grabber" type="button" aria-label="Expand destinations panel" aria-expanded="false" aria-controls="sheetScroll">
-          <span class="handle" aria-hidden="true"></span>
-        </button>
-        <div class="sheet-head"><div><span class="eyebrow">YOUR MAP, YOUR WAY</span><h1>Where to?</h1></div><span class="brand">My<span>Arah</span><span class="brand-dot">.</span></span></div>
-      </div>
-      <div id="sheetScroll" class="sheet-scroll" tabindex="0" aria-label="Destination options">
-        <button id="browse" class="destination-button" type="button" aria-haspopup="dialog" aria-controls="overlay"><span class="dest-circle"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.9" cy="10.9" r="6.5"/><path d="m16 16 4.3 4.3"/></svg></span><span class="dest-content"><strong>Search Malaysia</strong><small>Places, addresses and postcodes</small></span><span class="chevron" aria-hidden="true">›</span></button>
-        <button id="routePlan" class="route-plan" type="button" hidden>Compare driving routes <span aria-hidden="true">→</span></button>
-        <div id="sheetExtras" class="sheet-extras" inert aria-hidden="true">
-          <section id="routePreview" class="route-preview" aria-label="Driving route suggestions" hidden>
-            <div class="route-preview-header"><span>DRIVING ROUTES</span><button id="routeClose" type="button" aria-label="Hide routes">Clear</button></div>
-            <p id="routeDestination" class="route-destination"></p>
-            <p id="routeStatus" class="route-status" role="status" aria-live="polite">Choose a starting point.</p>
-            <div id="routeCards" class="route-cards" role="group" aria-label="Suggested routes"></div>
-            <section id="routeTolls" class="route-tolls" aria-label="Tolls on the selected route" hidden>
-              <div class="route-tolls-heading"><span class="route-tolls-heading-icon" aria-hidden="true">RM</span><strong>Tolls on this route</strong></div>
-              <p id="routeTollKnownTotal" class="route-toll-known-total" hidden></p>
-              <div id="routeTollItems" class="route-toll-items"></div>
-              <p class="route-toll-note">Class 1 cars. RM amounts are shown only when a fixed-rate plaza matches the route; these are identified charges, not a guaranteed complete trip total. Closed-system highways (such as PLUS and LPT) charge by entry and exit. Toll sections are not payment points. Verify your trip with an operator before travel.</p>
-              <details id="tollFareLookup" class="toll-fare-lookup">
-                <summary>Check Class 1 entry–exit fares</summary>
-                <p>This optional lookup uses a community mirror of LLM's calculator, not an automatic route match. Select the exact highway and plazas.</p>
-                <label for="tollFareHighway">Highway</label>
-                <select id="tollFareHighway"><option value="">Open lookup to load highways</option></select>
-                <div class="toll-fare-pair">
-                  <label for="tollFareEntry">Entry plaza<select id="tollFareEntry" disabled><option value="">Choose highway first</option></select></label>
-                  <label for="tollFareExit">Exit plaza<select id="tollFareExit" disabled><option value="">Choose highway first</option></select></label>
-                </div>
-                <button id="tollFareCalculate" type="button" disabled>Check Class 1 fare</button>
-                <p id="tollFareResult" role="status" aria-live="polite">Choose the highway, entry and exit.</p>
-                <a href="https://github.com/mohdsyahid/kadar-tol-malaysia" target="_blank" rel="noopener noreferrer">Data source and limitations ↗</a>
-              </details>
-              <div class="route-toll-links"><a href="https://www.plus.com.my/" target="_blank" rel="noopener noreferrer">PLUS toll calculator ↗</a><a href="https://www.llm.gov.my/" target="_blank" rel="noopener noreferrer">LLM toll calculator ↗</a></div>
-            </section>
-            <button id="navStart" class="nav-start" type="button" disabled hidden>Start navigation <span aria-hidden="true">→</span></button>
-            <button id="routePickOrigin" type="button" class="route-pick-origin">Choose start on map</button>
-            <p class="route-disclaimer">Travel times are estimates from TomTom live and historical traffic where available. Road conditions may change. Navigation is a foreground preview; keep your attention on the road.</p>
-          </section>
-          <div id="recentSection" class="recent-section" hidden>
-            <div class="section-caption">RECENT PLACES</div>
-            <div id="recentPlaces" class="chips" aria-label="Recently searched places"></div>
-          </div>
-          <button id="trafficConfigure" class="traffic-settings-row" type="button"><span class="traffic-settings-icon" aria-hidden="true">≋</span><span>Traffic settings</span><span aria-hidden="true">›</span></button>
-          <div class="sheet-footer"><div class="status-dot"></div><span id="placeSubtitle">Map ready · Malaysia</span><button id="recenter" aria-label="Show selected place">View <span aria-hidden="true">↗</span></button></div>
-        </div>
-      </div>
+  <main class="app-shell">
+    <section class="intro" aria-labelledby="intro-title">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">↗</span><span>MyArah</span></div>
+      <p class="eyebrow">A NEW DIRECTION</p>
+      <h1 id="intro-title">We're rebuilding the way forward.</h1>
+      <p class="description">MyArah is starting fresh. Our next Malaysia-first navigation experience is being designed from the ground up.</p>
+      <p class="status"><span class="status-dot" aria-hidden="true"></span> Redesign in progress</p>
     </section>
-    <section id="navHud" class="nav-hud" aria-label="Turn-by-turn directions" hidden>
-      <div class="nav-hud-turn surface">
-        <div class="nav-turn-main">
-          <div id="navTurnSymbol" class="nav-turn-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg></div>
-          <div class="nav-turn-copy">
-            <span id="navTurnDistance" class="nav-turn-distance">Finding route…</span>
-            <strong id="navTurnText" class="nav-turn-text">Preparing navigation</strong>
-            <span id="navTurnRoad" class="nav-turn-road" hidden></span>
-          </div>
-        </div>
-        <div id="navNextTurn" class="nav-turn-next" hidden>
-          <span class="nav-next-label">Then</span>
-          <span id="navNextTurnSymbol" class="nav-next-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" focusable="false"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg></span>
-          <span id="navNextTurnText" class="nav-next-text">Continue</span>
-          <span id="navNextTurnDistance" class="nav-next-distance">in 300 m</span>
-        </div>
-        <div id="navLaneGuide" class="nav-lane-guide" hidden aria-label="Verified lane guidance">
-          <span class="nav-lane-heading">LANES</span>
-          <span id="navLaneChoices" class="nav-lane-choices" aria-hidden="true"></span>
-          <span id="navLaneHint" class="nav-lane-hint"></span>
-        </div>
-      </div>
-      <p id="navAlert" class="nav-alert" role="status" aria-live="polite" hidden></p>
-    </section>
-    <!-- Read-only vehicle speed. Always subordinate to the navigation route and controls. -->
-    <div id="navSpeed" class="nav-speed-gauge" role="status" aria-live="off"
-         aria-label="GPS speed unavailable" title="Approximate GPS speed, not a vehicle speedometer" hidden>
-      <strong id="navSpeedValue" class="nav-speed-number" aria-hidden="true">—</strong>
-      <span class="nav-speed-unit" aria-hidden="true">km/h</span>
-    </div>
-    <!-- Posted limit from the selected TomTom route. A dash means unknown.
-         Separate from the refractive gauge so the road-sign badge is not clipped. -->
-    <div id="navSpeedLimit" class="nav-speed-limit-sign" role="status" aria-live="off"
-         aria-label="Road speed limit unavailable" title="Road speed limit unavailable" hidden>
-      <span class="nav-speed-limit-caption" aria-hidden="true">LIMIT</span>
-      <strong id="navSpeedLimitValue" aria-hidden="true">—</strong>
-    </div>
-    <section id="navFooter" class="nav-footer surface" aria-label="Navigation controls" hidden>
-      <div class="nav-trip-details">
-        <strong id="navRemaining">—</strong>
-        <span id="navEta">ETA —</span>
-      </div>
-      <div class="nav-footer-buttons" role="group" aria-label="Navigation actions">
-        <button id="navSound" class="nav-action-voice" type="button" data-voice-mode="normal" aria-label="Voice guidance settings, Normal" aria-haspopup="dialog" aria-expanded="false" aria-pressed="true" title="Voice guidance"><svg class="nav-action-icon nav-voice-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m17 9 5 6m0-6-5 6"/></svg><svg class="nav-action-icon nav-voice-playing" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg><svg class="nav-action-icon nav-voice-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/><path d="M4 3 2 6M20 3l2 3"/></svg><span class="nav-btn-label">Normal</span></button>
-        <button id="navFollow" class="nav-action-follow" type="button" aria-label="Recenter and follow my location" data-following="true" title="Recenter map" aria-hidden="true" tabindex="-1"><svg class="nav-action-icon nav-follow-filled" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true" focusable="false"><path d="M11.092 2.581a1 1 0 0 1 1.754-.116l.062.116l8.005 17.365c.198.566.05 1.196-.378 1.615a1.53 1.53 0 0 1-1.459.393l-7.077-2.398L5.1 21.894a1.535 1.535 0 0 1-1.52-.231l-.112-.1c-.398-.386-.556-.954-.393-1.556l.047-.15l7.97-17.276z"/></svg><span class="nav-btn-label">Recenter</span></button>
-        <button id="navReroute" class="nav-action-reroute" type="button" aria-label="Recalculate driving route" title="Recalculate route" hidden><svg class="nav-action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 11a8 8 0 0 0-14.9-4"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.9 4"/><path d="M20 20v-5h-5"/></svg><span class="nav-btn-label">Recalculate</span></button>
-        <button id="navEnd" class="nav-end" type="button" aria-label="End navigation" title="End navigation"><svg class="nav-action-icon nav-end-close-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 7 L17 17 M17 7 L7 17"/></svg><span class="nav-btn-label">End</span></button>
-      </div>
-    </section>
-    <div id="voiceMenu" class="myarah-voice-overlay" hidden>
-      <div class="myarah-voice-scrim" data-voice-dismiss="true" aria-hidden="true"></div>
-      <span id="voiceMenuPointer" class="myarah-voice-pointer" aria-hidden="true"></span>
-      <section id="voiceMenuDialog" class="myarah-voice-dialog" role="dialog" aria-modal="true" aria-labelledby="voiceMenuTitle" aria-describedby="voiceMenuSubtitle" tabindex="-1">
-        <div class="myarah-voice-heading">
-          <div><span class="myarah-voice-eyebrow">MYARAH NAVIGATION</span><h2 id="voiceMenuTitle">Voice guidance</h2></div>
-          <button id="voiceMenuClose" class="myarah-voice-close" type="button" aria-label="Close voice settings">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18"/></svg>
-          </button>
-        </div>
-        <p id="voiceMenuSubtitle" class="myarah-voice-subtitle">Choose what you hear during navigation.</p>
-        <div class="myarah-voice-options" role="group" aria-label="Spoken directions mode">
-          <button type="button" class="myarah-voice-choice" data-voice-option="normal" aria-pressed="true">
-            <span class="myarah-voice-choice-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg></span>
-            <span class="myarah-voice-choice-copy"><strong>Normal</strong><small>All turns and important alerts</small></span>
-            <span class="myarah-voice-check" aria-hidden="true">✓</span>
-          </button>
-          <button type="button" class="myarah-voice-choice" data-voice-option="alerts" aria-pressed="false">
-            <span class="myarah-voice-choice-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/><path d="M4 3 2 6M20 3l2 3"/></svg></span>
-            <span class="myarah-voice-choice-copy"><strong>Only Alerts</strong><small>Route changes and arrival</small></span>
-            <span class="myarah-voice-check" aria-hidden="true">✓</span>
-          </button>
-          <button type="button" class="myarah-voice-choice" data-voice-option="off" aria-pressed="false">
-            <span class="myarah-voice-choice-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m17 9 5 6m0-6-5 6"/></svg></span>
-            <span class="myarah-voice-choice-copy"><strong>Off</strong><small>Silent navigation</small></span>
-            <span class="myarah-voice-check" aria-hidden="true">✓</span>
-          </button>
-        </div>
-        <details id="englishVoiceSettings" class="myarah-english-voice-settings">
-          <summary><span>English voice</span><strong id="englishVoiceCurrent">iPhone voice</strong></summary>
-          <p>For a natural English voice, connect your secure Azure Speech Worker. Never enter an Azure API key here.</p>
-          <label for="englishVoiceUrl">Secure voice service URL</label>
-          <input id="englishVoiceUrl" type="url" autocomplete="url" autocapitalize="off" spellcheck="false" inputmode="url" placeholder="https://your-worker.workers.dev/tts" aria-describedby="englishVoiceStatus">
-          <div class="myarah-english-voice-actions">
-            <button type="button" id="englishVoiceOnline" aria-pressed="false">Save &amp; preview</button>
-            <button type="button" id="englishVoiceSystem" aria-pressed="true">Use iPhone voice</button>
-          </div>
-          <p id="englishVoiceStatus" role="status" aria-live="polite">The iPhone voice remains the fallback whenever online audio is unavailable.</p>
-        </details>
-      </section>
-    </div>
-    <div class="toast" id="notice" role="status" aria-live="polite" hidden></div>
-    <div class="traffic-dialog-backdrop" id="trafficDialog" hidden>
-      <section class="traffic-dialog surface" role="dialog" aria-modal="true" aria-labelledby="trafficDialogTitle">
-        <div class="traffic-dialog-header"><div><span class="traffic-dialog-kicker">MYARAH · MAP LAYERS</span><h2 id="trafficDialogTitle">Live traffic</h2></div><button id="trafficClose" type="button" class="traffic-dialog-close" aria-label="Close traffic settings">Done</button></div>
-        <p class="traffic-dialog-summary">Color the roads using actual traffic speeds, relative to normal free-flow conditions.</p>
-        <div class="traffic-color-guide" aria-label="Traffic colors"><span><i class="traffic-swatch clear"></i>Clear</span><span><i class="traffic-swatch slow"></i>Slower</span><span><i class="traffic-swatch jam"></i>Heavy jam</span></div>
-        <form id="trafficForm" class="traffic-form">
-          <label for="trafficApiKey">TomTom Traffic API key</label>
-          <div class="traffic-key-input"><input id="trafficApiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your API key" required><button id="trafficKeyVisibility" type="button" aria-label="Show API key">Show</button></div>
-          <p id="trafficMessage" class="traffic-message" role="status" aria-live="polite">A key is needed to display real traffic. No simulated congestion is shown.</p>
-          <button type="submit" id="trafficConnect" class="traffic-connect">Connect traffic</button>
-        </form>
-        <div class="traffic-dialog-footer"><a href="https://docs.tomtom.com/platform/documentation/my-tomtom/how-to-get-a-tomtom-api-key" target="_blank" rel="noopener noreferrer">How to get a free-tier API key ↗</a><button type="button" id="trafficForget" class="traffic-forget">Forget key</button></div>
-        <p class="traffic-privacy">Saved only in this browser on this device, never in your GitHub files. For a public production app, use a backend proxy or provider-approved key restrictions. Traffic availability and freshness depend on TomTom.</p>
-      </section>
-    </div>
-    <div class="modal-backdrop" id="overlay" aria-hidden="true">
-      <section class="search-modal" role="dialog" aria-modal="true" aria-label="Search Malaysia" tabindex="-1">
-        <div class="search-grabber" aria-hidden="true"></div>
-        <div class="search-panel-bar">
-          <form id="searchForm" class="search-form" role="search">
-            <label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.9" cy="10.9" r="6.5"/><path d="m16 16 4.3 4.3"/></svg><input id="searchInput" type="search" name="q" placeholder="Search Malaysia" aria-label="Search Malaysian places, addresses or postcodes" autocomplete="off" autocapitalize="words" enterkeyhint="search" maxlength="120" spellcheck="false" required></label>
-            <button class="search-submit" id="searchSubmit" type="submit">Search</button>
-          </form>
-          <button class="close" id="closeSearch" type="button" aria-label="Close search"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18"/></svg></button>
-        </div>
-        <div class="search-panel-content">
-          <p id="searchStatus" class="search-status" role="status" aria-live="polite"></p>
-          <div class="modal-label" id="resultsTitle">RECENTS</div>
-          <p id="recentSwipeHint" class="recent-swipe-hint" hidden>Swipe left on a recent place to remove it.</p>
-          <div id="results" class="results"></div>
-          <p class="modal-footnote">Results from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> via <a href="https://nominatim.org" target="_blank" rel="noopener noreferrer">Nominatim</a>. Search runs only when you tap Search. Recent places are saved on this device.</p>
-        </div>
-      </section>
-    </div>
   </main>
 </body>
 </html>

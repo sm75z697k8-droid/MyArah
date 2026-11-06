@@ -1,0 +1,12 @@
+# Local development and generated files
+.DS_Store
+Thumbs.db
+node_modules/
+dist/
+coverage/
+*.log
+
+# Never commit local secrets
+.env
+.env.*
+!.env.example
