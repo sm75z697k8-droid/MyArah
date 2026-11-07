@@ -1,6 +1,7 @@
 import { createThemeController } from "./features/theme/theme.js";
 import { createLocationController } from "./features/location/location-controller.js";
 import { createLocationOverlay } from "./features/location/location-overlay.js";
+import { installPressMotion } from "./features/ui/press-motion.js";
 
 const toggle = document.getElementById("theme-toggle");
 const status = document.getElementById("map-status");
@@ -9,6 +10,8 @@ const locationStatus = document.getElementById("location-status");
 let map = null;
 let setMapTheme = null;
 let mapReady = false;
+
+installPressMotion([toggle, locateButton]);
 
 function showFailure() {
   if (mapReady) return;

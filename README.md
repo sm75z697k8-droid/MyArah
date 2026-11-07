@@ -9,8 +9,8 @@ Malaysia-first navigation web app, rebuilt using a lightweight modular, map-firs
 - Theme switch and device dark-mode detection with persistent user preference.
 - **Tap-to-locate:** one-time browser Geolocation API request, blue GPS marker, geographically sized estimated horizontal accuracy circle, and animated map recentering.
 - Two compact frosted-glass controls with a thin stroke and subtle inner optical-edge highlight.
-- **Bubbly interactions:** a soft static glass glint, springy tap response, single GPS-success ring, and one-time position-dot entrance. No expensive distortion shader or continuous wobble.
-- Motion effects are disabled for users requesting reduced motion.
+- **Spring-jump interactions:** tapping either frosted control immediately makes it hop upward, settle, and rebound slightly. The old radar-style GPS success ring has been removed; the subtle one-time GPS-dot entrance remains.
+- Tap jumps use the Web Animations API with transforms only, respecting Reduced Motion and gracefully falling back to a simple press on unsupported browsers.
 - Reduced-motion support, safe-area handling, GPS permission and timeout messages.
 
 Not implemented: continuous position following, GPS heading, search, routing, turn-by-turn navigation, traffic, voice, lane guidance, speed limits, road elevations or 3D. The GPS position dot is the **most recently requested position**, not live continuous navigation.
@@ -34,7 +34,8 @@ MyArah/
 ├── README.md
 ├── tests/
 │   ├── atlas-style.test.mjs
-│   └── location.test.mjs
+│   ├── location.test.mjs
+│   └── press-motion.test.mjs
 └── src/
     ├── main.js
     ├── features/
@@ -49,14 +50,16 @@ MyArah/
     │   │   └── styles/
     │   │       ├── palettes.js
     │   │       └── tropical-atlas.js
-    │   └── theme/
-    │       └── theme.js
+    │   ├── theme/
+    │   │   └── theme.js
+    │   └── ui/
+    │       └── press-motion.js # Spring jump on glass-button taps
     └── styles/
         ├── tokens.css
         ├── base.css
         ├── map.css
         ├── location.css
-        └── bubbles.css     # Bubbly glass and motion effects
+        └── bubbles.css     # Soft static glint and GPS-dot entrance
 ```
 
 ### Implementation notes
@@ -67,7 +70,7 @@ The app has no production build step or runtime npm packages: GitHub Pages can s
 
 ### On-device validation checklist
 
-Check location grant, denial, timeout, initial camera recentering, repeated locate taps, panning away after locating, circle persistence through light/dark switching, map attribution visibility, button appearance in both modes, and Safari safe-area behavior. Confirm the success pulse only occurs on a successful fix and Reduced Motion disables effects. Automated unit tests cannot replace testing actual iPhone GPS/browser permissions.
+Check location grant, denial, timeout, initial camera recentering, repeated locate taps, panning away after locating, circle persistence through light/dark switching, map attribution visibility, button appearance in both modes, and Safari safe-area behavior. Confirm both glass controls jump immediately on tap (even when GPS fails), no radar ring appears, and Reduced Motion disables the extra animation. Automated unit tests cannot replace testing actual iPhone GPS/browser permissions.
 
 ### Archived prototype
 
@@ -75,4 +78,4 @@ The original version remains in [`archive/pre-revamp-2026-11-07`](../../tree/arc
 
 ## Next milestone
 
-Validate bubbly motion on iPhone Safari, then introduce destination search and accurately anchored map pins.
+Validate the new tap-to-jump feel on iPhone Safari, then introduce destination search and accurately anchored map pins.
