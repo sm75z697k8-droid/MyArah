@@ -57,8 +57,20 @@
   100% { transform: scale(1); opacity: 1; }
 }
 
+@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+  .glass-control {
+    background:
+      radial-gradient(ellipse at 29% 13%, var(--bubble-specular), transparent 68%),
+      var(--control-background);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .glass-control { transition: none; }
+  .glass-control,
+  .glass-control:active:not(:disabled) {
+    transform: none;
+    transition: none;
+  }
   .location-control[data-bubble="success"],
   .location-control[data-bubble="success"]::after,
   .location-control[data-bubble="success"] .location-arrow,
