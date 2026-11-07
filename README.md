@@ -8,7 +8,9 @@ Malaysia-first navigation web app, rebuilt using a lightweight modular, map-firs
 - Tropical Atlas cartography: warm limestone daytime and deep petrol nighttime colors.
 - Theme switch and device dark-mode detection with persistent user preference.
 - **Tap-to-locate:** one-time browser Geolocation API request, blue GPS marker, geographically sized estimated horizontal accuracy circle, and animated map recentering.
-- Two compact frosted-glass controls with a thin stroke and subtle inner optical-edge highlight. No expensive distortion shader.
+- Two compact frosted-glass controls with a thin stroke and subtle inner optical-edge highlight.
+- **Bubbly interactions:** a soft static glass glint, springy tap response, single GPS-success ring, and one-time position-dot entrance. No expensive distortion shader or continuous wobble.
+- Motion effects are disabled for users requesting reduced motion.
 - Reduced-motion support, safe-area handling, GPS permission and timeout messages.
 
 Not implemented: continuous position following, GPS heading, search, routing, turn-by-turn navigation, traffic, voice, lane guidance, speed limits, road elevations or 3D. The GPS position dot is the **most recently requested position**, not live continuous navigation.
@@ -53,7 +55,8 @@ MyArah/
         ├── tokens.css
         ├── base.css
         ├── map.css
-        └── location.css
+        ├── location.css
+        └── bubbles.css     # Bubbly glass and motion effects
 ```
 
 ### Implementation notes
@@ -64,7 +67,7 @@ The app has no production build step or runtime npm packages: GitHub Pages can s
 
 ### On-device validation checklist
 
-Check location grant, denial, timeout, initial camera recentering, repeated locate taps, panning away after locating, circle persistence through light/dark switching, map attribution visibility, button appearance in both modes, and Safari safe-area behavior. Automated unit tests cannot replace testing actual iPhone GPS/browser permissions.
+Check location grant, denial, timeout, initial camera recentering, repeated locate taps, panning away after locating, circle persistence through light/dark switching, map attribution visibility, button appearance in both modes, and Safari safe-area behavior. Confirm the success pulse only occurs on a successful fix and Reduced Motion disables effects. Automated unit tests cannot replace testing actual iPhone GPS/browser permissions.
 
 ### Archived prototype
 
@@ -72,4 +75,4 @@ The original version remains in [`archive/pre-revamp-2026-11-07`](../../tree/arc
 
 ## Next milestone
 
-Validate on iPhone Safari, then introduce destination search and accurately anchored map pins.
+Validate bubbly motion on iPhone Safari, then introduce destination search and accurately anchored map pins.

@@ -155,6 +155,7 @@ test("location controller only flies to coordinates after explicit tap", async (
     assert.equal(fly.zoom, 15);
     assert.equal(button.disabled, false);
     assert.equal(attrs["aria-busy"], undefined);
+    assert.equal(attrs["data-bubble"], "success");
     assert.match(status.textContent, /25 m/);
   } finally {
     globalThis.window = originalWindow;
@@ -165,11 +166,12 @@ test("a rejected location request restores the button without moving the map", a
   const originalWindow = globalThis.window;
   let click;
   let moved = false;
+  const attrs = { "data-bubble": "success" };
   const button = {
     disabled: false,
     addEventListener(_, cb) { click = cb; },
-    setAttribute() {},
-    removeAttribute() {},
+    setAttribute(key, value) { attrs[key] = value; },
+    removeAttribute(key) { delete attrs[key]; },
   };
   const status = { hidden: true, textContent: "", classList: { toggle() {} } };
   globalThis.window = {
@@ -187,6 +189,7 @@ test("a rejected location request restores the button without moving the map", a
     await click();
     assert.equal(moved, false);
     assert.equal(button.disabled, false);
+    assert.equal(attrs["data-bubble"], undefined);
     assert.match(status.textContent, /denied/);
   } finally {
     globalThis.window = originalWindow;

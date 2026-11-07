@@ -16,6 +16,8 @@ export function createLocationController({ button, status, map, overlay, request
   button.addEventListener("click", async () => {
     if (button.disabled) return;
 
+    // Restart the short success pulse for each new GPS request.
+    button.removeAttribute("data-bubble");
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
     notify("Finding your location…");
@@ -37,6 +39,7 @@ export function createLocationController({ button, status, map, overlay, request
         ? "Location found."
         : `Location found · estimated accuracy ±${Math.round(position.accuracy)} m`;
       notify(accuracyMessage, 4500);
+      button.setAttribute("data-bubble", "success");
     } catch (error) {
       notify(getLocationErrorMessage(error), 8500, true);
     } finally {

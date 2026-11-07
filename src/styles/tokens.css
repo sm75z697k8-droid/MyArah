@@ -14,6 +14,8 @@
   --glass-edge-shadow: rgba(54, 67, 62, 0.11);
   --glass-inner-highlight: rgba(255, 255, 255, 0.78);
   --glass-inner-shade: rgba(54, 67, 62, 0.10);
+  --bubble-specular: rgba(255, 255, 255, 0.62);
+  --bubble-pulse: rgba(41, 108, 149, 0.62);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -29,4 +31,6 @@
   --glass-edge-shadow: rgba(0, 0, 0, 0.26);
   --glass-inner-highlight: rgba(235, 255, 253, 0.27);
   --glass-inner-shade: rgba(0, 0, 0, 0.22);
+  --bubble-specular: rgba(224, 249, 246, 0.20);
+  --bubble-pulse: rgba(133, 209, 226, 0.75);
 }
