@@ -1,0 +1,69 @@
+/* Location button stays clear of iPhone safe areas and map attribution. */
+.location-control {
+  right: calc(14px + env(safe-area-inset-right, 0px));
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+
+.location-control .location-arrow {
+  width: 22px;
+  height: 22px;
+  transform: rotate(-8deg);
+}
+
+.location-control[aria-busy="true"] .location-arrow { display: none; }
+
+.location-spinner {
+  display: none;
+  width: 20px;
+  height: 20px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+}
+.location-control[aria-busy="true"] .location-spinner {
+  display: block;
+  animation: locate-spin 0.9s linear infinite;
+}
+
+.location-status {
+  position: absolute;
+  z-index: 2;
+  bottom: calc(158px + env(safe-area-inset-bottom, 0px));
+  right: calc(14px + env(safe-area-inset-right, 0px));
+  max-width: min(310px, calc(100vw - 28px));
+  padding: 11px 14px;
+  border: 1px solid var(--control-border);
+  border-radius: 13px;
+  background: var(--control-background);
+  color: var(--control-foreground);
+  box-shadow: 0 4px 14px var(--status-shadow);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  pointer-events: none;
+}
+.location-status[hidden] { display: none; }
+.location-status.is-error { color: var(--control-foreground); }
+
+.user-location-marker {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  pointer-events: none;
+}
+.user-location-dot {
+  width: 17px;
+  height: 17px;
+  border: 3px solid white;
+  border-radius: 50%;
+  background: #267EDD;
+  box-shadow: 0 1px 6px rgba(9, 27, 43, 0.35);
+}
+
+@keyframes locate-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .location-control[aria-busy="true"] .location-spinner {
+    animation: none;
+    border-right-color: currentColor;
+  }
+}

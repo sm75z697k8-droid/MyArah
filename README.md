@@ -1,70 +1,75 @@
 # MyArah
 
-Malaysia-first navigation project, rebuilt using a lightweight map-first architecture.
+Malaysia-first navigation web app, rebuilt using a lightweight modular, map-first architecture.
 
-## Current milestone: Tropical Atlas cartography
+## Implemented
 
-A real, full-screen, north-up 2D map built with [MapLibre GL JS](https://maplibre.org/maplibre-gl-js/docs/) v6.16.0 and [OpenFreeMap](https://openfreemap.org/quick_start/) vector tiles. Drag to pan or pinch to zoom.
+- Real full-screen north-up 2D map with [MapLibre GL JS](https://maplibre.org/maplibre-gl-js/docs/) v6.16.0 and [OpenFreeMap](https://openfreemap.org/quick_start/).
+- Tropical Atlas cartography: warm limestone daytime and deep petrol nighttime colors.
+- Theme switch and device dark-mode detection with persistent user preference.
+- **Tap-to-locate:** one-time browser Geolocation API request, blue GPS marker, geographically sized estimated horizontal accuracy circle, and animated map recentering.
+- Two compact frosted-glass controls with a thin stroke and subtle inner optical-edge highlight. No expensive distortion shader.
+- Reduced-motion support, safe-area handling, GPS permission and timeout messages.
 
-**Tropical Atlas** offers:
+Not implemented: continuous position following, GPS heading, search, routing, turn-by-turn navigation, traffic, voice, lane guidance, speed limits, road elevations or 3D. The GPS position dot is the **most recently requested position**, not live continuous navigation.
 
-- **Day:** warm limestone land, soft green vegetation, teal water, cream roads and subdued gold highways.
-- **Night:** deep petrol land, forest-green parks, blue-green water, clear pale labels and muted gold highways.
-- Automatic system light/dark appearance and a manually persistent theme toggle.
-- Road geometry, zoom behavior, map attribution, language labels, camera and gestures inherited from the original provider styles.
-- No CSS map inversion or fictional geographic data.
+## How to use location
 
-This is still a **plain map**, without search, location, routing, turn-by-turn guidance, traffic, voice, lane guidance, speed limits, road elevations or 3D mode.
+Open from an HTTPS URL (for example GitHub Pages) in Safari, then tap the arrow button at the lower right. Safari requests permission as needed. MyArah **does not** request location on page load. If permission is denied, allow Location Services and website access in iPhone/Safari settings.
 
-## Architecture
+A blue dot marks the returned device coordinates; the translucent circle shows the device's reported horizontal accuracy radius in meters. An accuracy estimate does **not** guarantee actual precision. Pan freely afterward. Tap the button again to request an updated fix.
+
+Your GPS coordinates remain in browser memory for the current page session. They are neither written to localStorage nor sent by our code to a backend. Map tiles are still fetched from the configured provider.
+
+## File structure
 
 ```text
 MyArah/
 ├── .github/workflows/validate.yml
 ├── .gitignore
-├── package.json              # Tests only; no production dependencies/build step
-├── README.md
 ├── index.html
-├── tests/atlas-style.test.mjs
+├── package.json
+├── README.md
+├── tests/
+│   ├── atlas-style.test.mjs
+│   └── location.test.mjs
 └── src/
     ├── main.js
     ├── features/
+    │   ├── location/
+    │   │   ├── geolocation.js        # Device request and errors
+    │   │   ├── accuracy.js           # Geodesic radius polygon
+    │   │   ├── location-overlay.js   # Map marker and accuracy layers
+    │   │   └── location-controller.js # Button interaction
     │   ├── map/
-    │   │   ├── config.js    # External style URLs and initial camera
-    │   │   ├── map.js       # MapLibre creation and theme application
+    │   │   ├── config.js
+    │   │   ├── map.js
     │   │   └── styles/
-    │   │       ├── palettes.js      # Design color roles
-    │   │       └── tropical-atlas.js # Source-preserving layer recoloring
+    │   │       ├── palettes.js
+    │   │       └── tropical-atlas.js
     │   └── theme/
-    │       └── theme.js     # System theme and localStorage preference
+    │       └── theme.js
     └── styles/
-        ├── tokens.css       # UI overlay colors
+        ├── tokens.css
         ├── base.css
-        └── map.css
+        ├── map.css
+        └── location.css
 ```
 
-### How styles work
+### Implementation notes
 
-The app loads the existing OpenFreeMap **Positron** (day) and **Dark** (night) styles at runtime. MapLibre's `transformStyle` callback recolors the recognized base-style layers before drawing, keeping all original sources, layer geometry, road width/zoom expressions and symbol layout untouched. MapLibre's `setStyle` performs theme changes without creating another map instance.
+Changing between the two OpenFreeMap base styles with `setStyle()` can discard dynamically added GeoJSON layers. The GPS accuracy layer is automatically reconstructed on MapLibre's `style.load` event. The GPS dot is a normal coordinate-anchored MapLibre Marker and continues to follow map transforms. The map and its gestures are never recreated by theme switching.
 
-The two source styles have **different layer IDs**, so `tropical-atlas.js` targets recognized layer semantics while leaving unknown layers unchanged. If upstream layer names or structures change, review the overrides and test live rendering again. Original provider sprite, font and source URLs are not rewritten.
+The app has no production build step or runtime npm packages: GitHub Pages can serve the static ES modules directly. Node.js 22+ is used for local tests (`npm test`) and GitHub Actions runs the tests automatically on pushes and pull requests.
 
-### Development / tests
+### On-device validation checklist
 
-GitHub Pages can serve the repository root without compilation. Internet access is needed for MapLibre and map tiles. Do not open the HTML directly as `file://`.
+Check location grant, denial, timeout, initial camera recentering, repeated locate taps, panning away after locating, circle persistence through light/dark switching, map attribution visibility, button appearance in both modes, and Safari safe-area behavior. Automated unit tests cannot replace testing actual iPhone GPS/browser permissions.
 
-Use Node.js 22+ and `npm test` to run local color-transformation tests, or let the GitHub Actions workflow run on pushes and pull requests. Tests use built-in Node APIs and do not require `npm install` or external test packages.
+### Archived prototype
 
-**Important:** Unit tests do not replace real iPhone Safari checks. Compare Kuala Lumpur, Johor Bahru, Penang, East Malaysia and motorway interchanges at different zooms; check day/night contrast, font readability and roads visually.
-
-### Theme persistence
-
-When no preference exists, MyArah follows the device. Tapping the toggle saves `myarah.map.theme` as `light` or `dark` in localStorage.
-
-## Previous prototype
-
-The pre-redesign app is preserved at [`archive/pre-revamp-2026-11-07`](../../tree/archive/pre-revamp-2026-11-07), from commit `82862a90c3137e226922a39688791c4dc9e56c76`. Deleting old Cloudflare Worker source from `main` did not remove independently deployed Workers.
+The original version remains in [`archive/pre-revamp-2026-11-07`](../../tree/archive/pre-revamp-2026-11-07), original commit `82862a90c3137e226922a39688791c4dc9e56c76`.
 
 ## Next milestone
 
-Test Tropical Atlas on a real iPhone, then tune any remaining road/label contrast issues before adding search or navigation controls.
+Validate on iPhone Safari, then introduce destination search and accurately anchored map pins.

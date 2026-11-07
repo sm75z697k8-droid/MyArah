@@ -1,7 +1,11 @@
 import { createThemeController } from "./features/theme/theme.js";
+import { createLocationController } from "./features/location/location-controller.js";
+import { createLocationOverlay } from "./features/location/location-overlay.js";
 
 const toggle = document.getElementById("theme-toggle");
 const status = document.getElementById("map-status");
+const locateButton = document.getElementById("locate-button");
+const locationStatus = document.getElementById("location-status");
 let map = null;
 let setMapTheme = null;
 let mapReady = false;
@@ -30,7 +34,16 @@ async function start() {
         window.clearTimeout(timeout);
         status.hidden = true;
         status.classList.remove("is-error");
+        locateButton.disabled = false;
       },
+    });
+
+    const overlay = createLocationOverlay(map, mapModule.MapMarker);
+    createLocationController({
+      button: locateButton,
+      status: locationStatus,
+      map,
+      overlay,
     });
   } catch (error) {
     window.clearTimeout(timeout);
