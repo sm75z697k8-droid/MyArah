@@ -10,20 +10,8 @@
   transform: rotate(-8deg);
 }
 
-.location-control[aria-busy="true"] .location-arrow { display: none; }
-
-.location-spinner {
-  display: none;
-  width: 20px;
-  height: 20px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-}
-.location-control[aria-busy="true"] .location-spinner {
-  display: block;
-  animation: locate-spin 0.9s linear infinite;
-}
+/* Keep the arrow visible during GPS requests; announce progress in status text. */
+.location-control[aria-busy="true"] { cursor: progress; }
 
 .location-status {
   position: absolute;
@@ -60,10 +48,3 @@
   box-shadow: 0 1px 6px rgba(9, 27, 43, 0.35);
 }
 
-@keyframes locate-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-  .location-control[aria-busy="true"] .location-spinner {
-    animation: none;
-    border-right-color: currentColor;
-  }
-}

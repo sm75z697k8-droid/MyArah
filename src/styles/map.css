@@ -13,8 +13,7 @@
 
 .map-canvas { touch-action: none; }
 
-/* Small glass controls: frosted blur + optical edge highlights.
-   Avoid expensive displacement filters or large animated backdrops. */
+/* Static frosted-glass controls, with a visible, softened map backdrop. */
 .glass-control {
   position: absolute;
   z-index: 2;
@@ -27,12 +26,11 @@
   border-radius: 50%;
   background: var(--glass-fill);
   color: var(--control-foreground);
-  -webkit-backdrop-filter: blur(14px) saturate(135%);
-  backdrop-filter: blur(14px) saturate(135%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  backdrop-filter: blur(12px) saturate(120%);
   box-shadow:
     inset 0 1px 0 var(--glass-edge-light),
-    inset 0 -1px 0 var(--glass-edge-shadow),
-    0 2px 10px var(--status-shadow);
+    0 2px 8px var(--status-shadow);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
@@ -42,11 +40,7 @@
   content: "";
   position: absolute;
   inset: 2px;
-  border: 1px solid transparent;
-  border-top-color: var(--glass-inner-highlight);
-  border-left-color: var(--glass-inner-highlight);
-  border-bottom-color: var(--glass-inner-shade);
-  border-right-color: var(--glass-inner-shade);
+  border: 1px solid var(--glass-inner-highlight);
   border-radius: inherit;
   pointer-events: none;
 }
@@ -58,11 +52,11 @@
   z-index: 1;
 }
 
-.glass-control:active:not(:disabled) { transform: scale(0.96); }
+.glass-control:active:not(:disabled) { background: var(--glass-pressed); }
 .glass-control:disabled { cursor: default; }
 .glass-control:disabled:not([aria-busy="true"]) { opacity: 0.6; }
 
-@supports not (backdrop-filter: blur(14px)) {
+@supports not ((backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px))) {
   .glass-control { background: var(--control-background); }
 }
 
@@ -107,6 +101,3 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .glass-control:active:not(:disabled) { transform: none; }
-}
